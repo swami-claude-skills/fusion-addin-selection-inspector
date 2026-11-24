@@ -1,0 +1,7 @@
+{
+  "version": "2.36.6",
+  "date": "Nov 24, 2026",
+  "notes": "First release on GitHub: installers and install steps added; add-in unchanged.",
+  "zip": "https://github.com/swami-claude-skills/fusion-addin-selection-inspector/releases/latest/download/SelectionInspector.zip",
+  "dashboard": "https://swami-claude-skills.github.io/fusion-addin-selection-inspector/"
+}

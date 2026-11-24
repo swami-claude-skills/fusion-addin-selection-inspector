@@ -1,0 +1,39 @@
+SELECTION INSPECTOR - HOW TO INSTALL
+====================================
+
+Documentation: https://swami-claude-skills.github.io/fusion-addin-selection-inspector/
+
+Pick ONE of the three ways below.
+
+1. IN FUSION (RECOMMENDED)
+   Mac and Windows. Nothing to approve, because no installer script runs.
+
+   1) Unzip SelectionInspector.zip and put the SelectionInspector folder somewhere it can stay, for example in Documents. Fusion runs the add-in from that folder.
+   2) In Fusion, open Scripts and Add-Ins: press Shift+S, or click the UTILITIES tab, open the ADD-INS drop-down and choose Scripts and Add-Ins.
+   3) Click the + next to My Add-Ins and choose the SelectionInspector folder.
+   4) Turn on Run and Run on Startup for SelectionInspector.
+   5) The Selection Inspector button is in the INSPECT panel of every tab (SOLID, SURFACE, MESH, SHEET METAL and the rest).
+
+2. MAC INSTALLER
+   Copies the add-in into Fusion's own AddIns folder. macOS blocks it the first time.
+
+   1) Unzip SelectionInspector.zip, open the SelectionInspector folder and double-click install-macos.command.
+   2) macOS says it could not verify the file. Click Done (not Move to Trash).
+   3) Open System Settings > Privacy & Security, scroll down to Security, and next to "install-macos.command was blocked" click Open Anyway. Confirm with Open Anyway again and your Mac password or Touch ID.
+   4) A Terminal window copies the add-in and says Done. Press Return to close it.
+   5) In Fusion, open Scripts and Add-Ins: press Shift+S, or click the UTILITIES tab, open the ADD-INS drop-down and choose Scripts and Add-Ins. Select SelectionInspector under Add-Ins and turn on Run and Run on Startup.
+   6) macOS asks again for every newly downloaded zip, so the In Fusion way is easier for updates.
+
+3. WINDOWS INSTALLER
+   Copies the add-in into Fusion's own AddIns folder.
+
+   1) Right-click SelectionInspector.zip and choose Extract All (the installer can't run from inside the zip).
+   2) Open the extracted SelectionInspector folder and double-click install-windows.cmd.
+   3) If Windows shows Windows protected your PC, click More info, then Run anyway. If it shows an Open File - Security Warning, click Run.
+   4) A window copies the add-in and says Done. Press Enter to close it.
+   5) In Fusion, open Scripts and Add-Ins: press Shift+S, or click the UTILITIES tab, open the ADD-INS drop-down and choose Scripts and Add-Ins. Select SelectionInspector under Add-Ins and turn on Run and Run on Startup.
+
+UPDATING
+   Download the new SelectionInspector.zip and install it the same way. Your keyboard
+   shortcut is kept. Then in Scripts and Add-Ins turn the Run switch for
+   SelectionInspector off, then on (or restart Fusion).

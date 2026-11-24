@@ -1,0 +1,75 @@
+# Publishes a GitHub Release whenever a new version reaches main.
+#
+# A release happens when version.json (or this workflow) changes on main and no release
+# exists yet for the add-in's VERSION. It builds SelectionInspector.zip with
+# tools/build_release.py, creates the tag vX.Y.Z, and attaches the zip under that fixed
+# name, so
+#   https://github.com/swami-claude-skills/fusion-addin-selection-inspector/releases/latest/download/SelectionInspector.zip
+# always serves the newest version. Release notes come from notes/vX.Y.Z.md when present.
+# It can also be started by hand from the Actions tab (Run workflow).
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - version.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Read the add-in version
+        id: ver
+        run: |
+          v=$(python3 -c "import re;print(re.search(r\"^VERSION\s*=\s*'([^']+)'\", open('SelectionInspector/SelectionInspector.py').read(), re.M).group(1))")
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          echo "Add-in version: $v"
+
+      - name: Skip if this version is already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.ver.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.ver.outputs.tag }} already exists; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check the documentation is for this version
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          want="${{ steps.ver.outputs.tag }}"; want="${want#v}"
+          have=$(grep -o '<meta name="addin-version" content="[^"]*">' docs/index.html | sed 's/.*content="\([^"]*\)".*/\1/')
+          if [ "$have" != "$want" ]; then
+            echo "::error::docs/index.html is for v${have:-unknown}, add-in is v$want. Run tools/build_docs.py and update the docs before releasing."
+            exit 1
+          fi
+          grep -q "<span class=\"lbl\">v$want" docs/index.html || { echo "::error::What's New in docs/index.html has no entry for v$want."; exit 1; }
+          echo "Documentation matches v$want"
+
+      - name: Build the zip
+        if: steps.check.outputs.skip != 'true'
+        run: python3 tools/build_release.py
+
+      - name: Publish the release
+        if: steps.check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.ver.outputs.tag }}"
+          notes="notes/$tag.md"
+          [ -f "$notes" ] || { echo "Release $tag" > /tmp/notes.md; notes=/tmp/notes.md; }
+          gh release create "$tag" dist/SelectionInspector.zip \
+            --target "$GITHUB_SHA" --title "$tag" --notes-file "$notes" --latest

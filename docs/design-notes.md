@@ -1,6 +1,9 @@
-# Selection Inspector — Autodesk Fusion add-in
+# Selection Inspector — design notes
 
 **v2.36.6**
+
+How the add-in works and why it was built that way. For installing, see
+[README.md](../README.md) or `READ ME FIRST.txt` inside the zip.
 
 A non-modal palette that lists every entity in the active design in an interactive table:
 sortable columns, drag-resizable columns with fit-to-widest, and a show/hide checkbox per row.
@@ -17,20 +20,21 @@ where tokens aren't available at all), and a pick is matched against all of them
 
 ## Install
 
-**macOS** — double-click `install-macos.command`
-(first run may need right-click → Open, because macOS Gatekeeper flags unsigned `.command` files)
+Three ways, all described step by step in `READ ME FIRST.txt` in the zip and on the
+[documentation page](https://swami-claude-skills.github.io/fusion-addin-selection-inspector/):
 
-**Windows** — double-click `install-windows.cmd`
+1. **In Fusion** (recommended): Scripts and Add-Ins (Shift+S) → **+** next to My Add-Ins → choose
+   the `SelectionInspector` folder → turn on **Run** and **Run on Startup**.
+2. **macOS installer**: double-click `install-macos.command`. macOS blocks it the first time; allow
+   it in **System Settings ▸ Privacy & Security ▸ Open Anyway**.
+3. **Windows installer**: **Extract All** first, then double-click `install-windows.cmd`. If
+   SmartScreen appears, **More info ▸ Run anyway**.
 
-Either script copies the add-in into Fusion's per-user `AddIns` folder and excludes itself from
-what it copies. To install by hand instead, drop the whole `SelectionInspector` folder into:
+Both installers copy the add-in into Fusion's per-user `AddIns` folder, replacing any older copy,
+and leave themselves and `READ ME FIRST.txt` behind:
 
 - macOS: `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/`
 - Windows: `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\`
-
-Then in Fusion: **Utilities → Add-Ins → Scripts and Add-Ins** (Shift+S) → **Add-Ins** tab →
-select **SelectionInspector** → **Run**. The manifest sets `runOnStartup: true`, so it loads
-automatically on subsequent launches.
 
 ## Where the button lives
 
@@ -320,8 +324,8 @@ The title bar reads **Selection Inspector (v2.34.1)** — parenthesized, lower-c
 renders palette titles in capitals, so on screen it shows as `(V2.34.1)`; that's Fusion's styling,
 not the string.
 
-`tests/t57.js` asserts the opening state as declared and as rendered; `tests/t58.js` drives two
-sessions against one storage — end the first on Tools with the log open, and check the second still
+The development tests (not part of this repository) assert the opening state as declared and as
+rendered, and drive two sessions against one storage — end the first on Tools with the log open, and check the second still
 opens on List with it hidden.
 
 ## The toolbar
@@ -719,7 +723,7 @@ The scheme is semantic versioning, judged by what changes for *you*, not by how 
 A patch release should never change how you use the add-in — if the README needs a new sentence
 describing something you can now do, it isn't a patch.
 
-## Version numbers
+### Code and palette versions
 
 The add-in is **two files loaded by two different things**: Fusion imports
 `SelectionInspector.py`, and CEF loads `palette.html`. They can disagree.
@@ -738,8 +742,8 @@ instead of pretending. The startup banner reports all three:
 Selection Inspector v2.31.3 · palette UI v2.31.3 · manifest on disk v2.31.3 · /Users/you/…/AddIns/SelectionInspector
 ```
 
-Any of the three disagreeing appends `<-- MISMATCH` and colors the line red. `tests/stamp_version.py`
-writes all of them from `VERSION`, so they can't drift by hand, and `tests/t54.js` fails if they do.
+Any of the three disagreeing appends `<-- MISMATCH` and colors the line red. `tools/build_release.py`
+refuses to build if `VERSION`, the manifest and the palette's `UI_VERSION` disagree.
 
 
 `VERSION` in `SelectionInspector.py` is the single source of truth. It feeds the palette title bar,
@@ -780,7 +784,7 @@ it. Not worth it, so the GUID stays fixed.
 ## Layout
 
 There's no in-page header — the palette's own title bar carries the name and version
-(`Selection Inspector v2.36.6`), so all the vertical space goes to the table. The active document
+(`Selection Inspector (v2.36.6)`), so all the vertical space goes to the table. The active document
 name sits at the left of the footer.
 
 The version comes from one place: `VERSION` in `SelectionInspector.py`, which builds the palette
