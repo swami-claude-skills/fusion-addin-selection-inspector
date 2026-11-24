@@ -346,7 +346,8 @@ Each time the palette opens (at most once every two minutes) it reads `version.j
 a background thread. When a newer version is out, a green bar offers **Install update**, which
 downloads `SelectionInspector.zip`, backs up the current files to the settings folder and replaces
 them; then turn the add-in's Run switch off and on in Scripts and Add-Ins. **Tools ▸ Check for
-updates** checks on demand, and **Tools ▸ Docs** opens the documentation.
+updates** checks on demand, **Tools ▸ Auto-check** turns the automatic check and its green bar off
+or on (saved as `checkUpdates`), and **Tools ▸ Docs** opens the documentation.
 
 The title bar reads **Selection Inspector (v2.34.1)** — parenthesized, lower-case `v`. Fusion
 renders palette titles in capitals, so on screen it shows as `(V2.34.1)`; that's Fusion's styling,
@@ -365,7 +366,7 @@ Controls are grouped into four tabs, one panel visible at a time:
 | **List** | What the table lists — text filter with its **×**, type dropdown, **Selected only**, **Sub-entities** |
 | **Visibility** | What's shown in the viewport — the All / Selected / Not selected radios, **Show all**, **Hide all** |
 | **Columns** | **Fit columns** |
-| **Tools** | **Under-constrained**, **Legend**, **Log**, **Check for updates**, **Docs**, **Reset all** |
+| **Tools** | **Under-constrained**, **Legend**, **Log**, **Check for updates**, **Auto-check**, **Docs**, **Reset all** |
 
 **Refresh** sits outside the tabs, on the tab strip itself, so a rescan is one click away wherever
 you are. The palette always opens on List (see "What you get on open").

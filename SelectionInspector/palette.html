@@ -529,6 +529,7 @@ body.resizing-v{cursor:row-resize;}
   <button id="btnLog" title="Show or hide the log pane">Log</button>
   <div class="sep"></div>
   <button id="btnUpdCheck" title="Check GitHub for a newer version now">Check for updates</button>
+  <button id="btnAutoUpd" title="Check for a newer version each time the palette opens. Off: no automatic check and no green bar; Check for updates still works.">Auto-check</button>
   <button id="btnDocs" title="Open the documentation in your web browser">Docs</button>
   <button id="btnReset" title="Restore every setting to its default: column widths, sort order, log height, copy mode, the update check, and the opening state. Asks first.">Reset all</button>
 </div>
@@ -2202,6 +2203,7 @@ function applyDefaults(settings){
   sortKey = null; sortDir = 1;
   logHeight = typeof p.logHeight === 'number' ? p.logHeight : 150;
   copyMode = p.copyMode === 'plain' ? 'plain' : 'color';
+  autoCheck = true; paintAutoCheck();
   try{
     window.localStorage.removeItem('si.widths');
     window.localStorage.removeItem('si.log');
@@ -2243,6 +2245,9 @@ function applySettings(settings){
   }
   if(typeof p.logHeight === 'number') logHeight = p.logHeight;
   if(p.copyMode === 'color' || p.copyMode === 'plain') copyMode = p.copyMode;
+  const o = (settings && settings.options) || {};
+  if(typeof o.checkUpdates === 'boolean') autoCheck = o.checkUpdates;
+  paintAutoCheck();
   applyCopyMode(); applyLogHeight(); applyWidths(); render();
 }
 /* Extra fields only the first 'ready' reply carries. */
@@ -2740,12 +2745,18 @@ window.addEventListener('error', e => {
   showErr('Palette script error: ' + (e.message || e) + (e.lineno ? ' (line ' + e.lineno + ')' : ''));
 });
 
-let UPD = {}, updDismissed = false;
+let UPD = {}, updDismissed = false, autoCheck = true, manualCheck = false;
+function paintAutoCheck(){ $('btnAutoUpd').classList.toggle('on', autoCheck); }
+$('btnAutoUpd').addEventListener('click', () => {
+  autoCheck = !autoCheck; paintAutoCheck(); applyUpdate(UPD);
+  uiLog('Toggle: automatic update check -> ' + (autoCheck ? 'on' : 'off'));
+  if(connected) send('saveSettings', {options:{checkUpdates:autoCheck}});
+});
 function applyUpdate(info){
   UPD = info || {};
   const bar = $('updbar'), msg = bar.querySelector('.msg');
   const st = UPD.state;
-  const show = !updDismissed && (st === 'newer' || st === 'installing' || st === 'installed' || st === 'installFailed');
+  const show = !updDismissed && (autoCheck || manualCheck) && (st === 'newer' || st === 'installing' || st === 'installed' || st === 'installFailed');
   bar.style.display = show ? 'flex' : 'none';
   $('updInstall').disabled = (st === 'installing' || st === 'installed');
   $('updInstall').style.display = (st === 'installed') ? 'none' : '';
@@ -2775,7 +2786,7 @@ $('updWhat').addEventListener('click', () => openUrl(LINKS.releases));
 $('updX').addEventListener('click', () => { updDismissed = true; applyUpdate(UPD); });
 $('btnUpdCheck').addEventListener('click', () => {
   if(!connected){ logLine('Not connected to Fusion - this is the standalone preview.', 'warn'); return; }
-  updDismissed = false;
+  updDismissed = false; manualCheck = true;
   send('checkUpdate', {});
 });
 $('btnDocs').addEventListener('click', () =>
@@ -3078,6 +3089,7 @@ function boot(){
   setLogVisible(logVisible);
   logLine('Palette loaded.', 'sys');
   loadReveal();
+  paintAutoCheck();
   buildHeader();
   render('Connecting to Fusion…');
 
