@@ -1,6 +1,6 @@
 # Selection Inspector — design notes
 
-**v2.36.6**
+**v2.37.0**
 
 How the add-in works and why it was built that way. For installing, see
 [README.md](../README.md) or `READ ME FIRST.txt` inside the zip.
@@ -316,9 +316,37 @@ used with the log still showing, because `savePrefs()` stored the active tab and
 visibility and `loadPrefs()` restored them — so a session that happened to end on **Tools** reopened
 there forever. **Opening state is not a preference.**
 
-What is stored: log height, copy mode, column widths — how things look once you're using them.
-What isn't: the active tab, whether the log is showing, and which toggles are lit. Older stored
-values for those are ignored rather than read back.
+What is stored: log height, copy mode, column widths — how things look once you're using them —
+plus whether to check for updates. What isn't: the active tab, whether the log is showing, and which
+toggles are lit. Older stored values for those are ignored rather than read back.
+
+## Settings and Reset all
+
+Since v2.37.0 the stored preferences live in a settings file outside the add-in folder, so
+reinstalling (which wipes the folder) and clearing Fusion's web cache both keep them:
+
+- macOS: `~/Library/Application Support/SwamiFusionAddins/SelectionInspector/settings.json`
+- Windows: `%APPDATA%\SwamiFusionAddins\SelectionInspector\settings.json`
+
+`DEFAULTS` in `SelectionInspector.py` is the factory state and the schema. Loading merges the file
+over it, so a setting added in a later version appears with its default, and unknown or out-of-range
+values are dropped. The first time v2.37.0 runs, the widths, log height and copy mode the palette
+had in browser storage are copied into the file once.
+
+**Tools ▸ Reset all** asks first, then puts every stored preference back to `DEFAULTS` and returns
+the palette to its opening state: List tab, log hidden, filter and type filter cleared, Selected only,
+Sub-entities and Reveal selected off, natural sort order, default column widths.
+
+## Errors and updates
+
+Errors from either side show in a red strip at the top of the palette as well as in the log, because
+a docked panel that silently does nothing is the hardest failure to diagnose. Click it to dismiss.
+
+Each time the palette opens (at most once every two minutes) it reads `version.json` from GitHub on
+a background thread. When a newer version is out, a green bar offers **Install update**, which
+downloads `SelectionInspector.zip`, backs up the current files to the settings folder and replaces
+them; then turn the add-in's Run switch off and on in Scripts and Add-Ins. **Tools ▸ Check for
+updates** checks on demand, and **Tools ▸ Docs** opens the documentation.
 
 The title bar reads **Selection Inspector (v2.34.1)** — parenthesized, lower-case `v`. Fusion
 renders palette titles in capitals, so on screen it shows as `(V2.34.1)`; that's Fusion's styling,
@@ -336,18 +364,17 @@ Controls are grouped into four tabs, one panel visible at a time:
 | --- | --- |
 | **List** | What the table lists — text filter with its **×**, type dropdown, **Selected only**, **Sub-entities** |
 | **Visibility** | What's shown in the viewport — the All / Selected / Not selected radios, **Show all**, **Hide all** |
-| **Columns** | **Fit columns**, **Reset** |
-| **Tools** | **Under-constrained**, **Legend**, **Log** |
+| **Columns** | **Fit columns** |
+| **Tools** | **Under-constrained**, **Legend**, **Log**, **Check for updates**, **Docs**, **Reset all** |
 
 **Refresh** sits outside the tabs, on the tab strip itself, so a rescan is one click away wherever
-you are. The active tab is remembered between sessions, and an unrecognized stored value falls
-back to List.
+you are. The palette always opens on List (see "What you get on open").
 
 ## Interactions
 
 - **Sort** — click a header: ascending → descending → back to natural order.
 - **Resize** — drag the right edge of any header. Double-click it to fit that column to its widest entry, in full — there is no width ceiling.
-- **Fit to widest** — double-click a header's right edge to fit that one column; **Fit columns** in the toolbar fits them all. Widths are measured against the actual rendered text. They persist between sessions only if the host allows local storage — Fusion serves the palette from a `file://` path, where browsers block it, so treat persistence as a bonus rather than a promise. It degrades quietly either way.
+- **Fit to widest** — double-click a header's right edge to fit that one column; **Fit columns** in the toolbar fits them all. Widths are measured against the actual rendered text. Since v2.37.0 they are saved to the settings file (see "Settings and Reset all"), so they persist reliably.
 - **Legend** — opens `legend.html` as its own floating palette: a vertical list of color swatches and what each means, with no quantities in it. Non-modal, so you can leave it open beside the table or drag it anywhere.
 
   It opens fully expanded — no scrolling, nothing clipped — because the page measures its own content once webfonts have settled and hands the size back to Fusion, which resizes the window to match. Descriptions are `nowrap`, so the width follows the longest line rather than a number I guessed. Python clamps the result to sane bounds in case the measurement ever comes back degenerate.
@@ -357,7 +384,7 @@ back to List.
   hidden rather than destroyed, so the button brings it straight back.
 
   It anchors with its **top-right corner on the table palette's top-left corner**, floating rather than docked, and re-anchors every time you open it so it follows the table around. If the table palette is docked (no meaningful coordinates), the legend is left wherever Fusion put it rather than being thrown to 0,0. The button mirrors whether the window is open, and `stop()` disposes of it.
-- **Reset** — restores default widths and clears the sort.
+- **Reset all** (Tools tab) — asks first, then restores every setting and the opening state; see "Settings and Reset all".
 - **Select** — tick the **Selected** checkbox to select that entity in Fusion, untick to deselect. The palette sends the complete desired set each time rather than a delta, so the table and Fusion can't drift apart. A nested body is selected through its occurrence proxy, since Fusion won't take the raw component-level object. Hidden entities can't be selected in Fusion at all — that comes back as a message rather than a checkbox that silently springs back.
 - **Rows are still inert** — left-clicking a row does nothing. The two checkboxes and the caret are the only left-click controls in a row.
 - **Right-click a name** — a small menu offers **Show in Browser**, **Show in Window** and **Show in Timeline**. Each selects that entity in Fusion, then runs Fusion's matching Find command. Only `FindInWindow` is documented. Each destination carries a list of likely ids and, when none of
@@ -750,7 +777,7 @@ refuses to build if `VERSION`, the manifest and the palette's `UI_VERSION` disag
 the button's tooltip, and a line written to **Utilities → Text Commands** at every startup:
 
 ```
-Selection Inspector: running v2.36.6 from /Users/you/Library/.../AddIns/SelectionInspector
+Selection Inspector: running v2.37.0 from /Users/you/Library/.../AddIns/SelectionInspector
 ```
 
 That log line is authoritative — it names the version *and* the folder actually loaded. If the
@@ -784,7 +811,7 @@ it. Not worth it, so the GUID stays fixed.
 ## Layout
 
 There's no in-page header — the palette's own title bar carries the name and version
-(`Selection Inspector (v2.36.6)`), so all the vertical space goes to the table. The active document
+(`Selection Inspector (v2.37.0)`), so all the vertical space goes to the table. The active document
 name sits at the left of the footer.
 
 The version comes from one place: `VERSION` in `SelectionInspector.py`, which builds the palette
@@ -794,4 +821,4 @@ title at startup. Bumping it there (and in the manifest) is the whole job.
 
 - The palette is a **palette**, so it's inherently non-modal — dock it, float it, keep modeling with it open. It opens docked right at 940×560.
 - `palette.html` can be opened directly in a browser; it falls back to a small demo dataset so you can check the UI without launching Fusion.
-- Fonts load from Google Fonts with local monospace/sans fallbacks, so the palette still renders correctly offline.
+- Nothing loads from the internet: the palette uses JetBrains Mono and DM Sans if they are installed, and the system monospace and sans fonts otherwise. `color-scheme: dark` keeps scrollbars and form controls dark on Windows.

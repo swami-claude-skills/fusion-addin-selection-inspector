@@ -14,11 +14,21 @@
 
 import adsk.core
 import adsk.fusion
+import copy
 import datetime
+import io
 import json
 import os
+import re
+import shutil
+import subprocess
+import sys
+import threading
 import time
 import traceback
+import urllib.request
+import webbrowser
+import zipfile
 
 # ---------------------------------------------------------------------------
 # Module-level state. Handlers MUST live here: Fusion holds event handlers by
@@ -32,7 +42,7 @@ handlers = []                 # keeps every event handler alive
 _app_events = []              # (event, handler) pairs to unsubscribe in stop()
 
 ADDIN_TITLE = 'Selection Inspector'
-VERSION = '2.36.6'      # single source of truth - pushed to the palette header
+VERSION = '2.37.0'      # single source of truth - pushed to the palette header
 
 CMD_ID = 'swamiSelectionInspectorCmd'
 CMD_NAME = 'Selection Inspector'
@@ -60,6 +70,114 @@ LEGEND_CHROME_H = 40
 INSPECT_MATCH = 'inspect'
 FALLBACK_PANEL_ID = 'SolidScriptsAddinsPanel'  # only if no INSPECT panel exists
 ICON_FOLDER = './resources/command'
+
+# ---------------------------------------------------------------------------
+# Where the latest version and the documentation live (GitHub)
+# ---------------------------------------------------------------------------
+TOOL_NAME = 'SelectionInspector'
+REPO = 'swami-claude-skills/fusion-addin-selection-inspector'
+VERSION_URL = 'https://raw.githubusercontent.com/%s/main/version.json' % REPO
+DOWNLOAD_URL = 'https://github.com/%s/releases/latest/download/%s.zip' % (REPO, TOOL_NAME)
+DASHBOARD_URL = 'https://swami-claude-skills.github.io/fusion-addin-selection-inspector/'
+RELEASES_URL = 'https://github.com/%s/releases' % REPO
+UPDATE_EVENT_ID = 'swamiSelectionInspector_updateInfo'
+UPDATE_RECHECK_S = 120        # at most one automatic check per two minutes
+
+# ---------------------------------------------------------------------------
+# Settings. DEFAULTS is the factory state and the schema: every persisted
+# value lives here. The file sits outside the add-in folder, so reinstalling
+# (which wipes and recopies the folder) keeps it. Loading merges the file over
+# DEFAULTS, so a setting added later appears with its default.
+#
+# Only preferences are stored - how things look once you are using them. The
+# opening state (List tab, log hidden, toggles off) is deliberately not a
+# preference; see "What you get on open" in the design notes.
+# ---------------------------------------------------------------------------
+DEFAULTS = {
+    'prefs': {
+        'widths': None,        # column widths in px, keyed by column; None = the palette's defaults
+        'logHeight': 150,      # log pane height in px
+        'copyMode': 'color',   # 'color' | 'plain' - how Copy puts the log on the clipboard
+    },
+    'options': {
+        'checkUpdates': True,  # look for a newer version when the palette opens
+    },
+}
+
+
+def _data_root():
+    return os.environ.get('APPDATA', os.path.expanduser('~')) if os.name == 'nt' \
+        else os.path.expanduser('~/Library/Application Support')
+
+
+def _data_dir():
+    """Per-user folder outside the add-in (settings, update backups)."""
+    d = os.path.join(_data_root(), 'SwamiFusionAddins', TOOL_NAME)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _settings_path():
+    return os.path.join(_data_dir(), 'settings.json')
+
+
+def _deep_merge(base, over):
+    out = copy.deepcopy(base)
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def _clean_settings(state):
+    """Keep only known keys with sane values, so a hand-edited or damaged
+    file can't break the palette."""
+    clean = copy.deepcopy(DEFAULTS)
+    prefs = (state or {}).get('prefs') or {}
+    widths = prefs.get('widths')
+    if isinstance(widths, dict):
+        clean['prefs']['widths'] = {str(k): int(v) for k, v in widths.items()
+                                    if isinstance(v, (int, float)) and 20 <= v <= 4000}
+    h = prefs.get('logHeight')
+    if isinstance(h, (int, float)) and 40 <= h <= 4000:
+        clean['prefs']['logHeight'] = int(h)
+    if prefs.get('copyMode') in ('color', 'plain'):
+        clean['prefs']['copyMode'] = prefs['copyMode']
+    opts = (state or {}).get('options') or {}
+    if isinstance(opts.get('checkUpdates'), bool):
+        clean['options']['checkUpdates'] = opts['checkUpdates']
+    return clean
+
+
+def _load_settings():
+    try:
+        with open(_settings_path(), 'r', encoding='utf-8') as f:
+            saved = json.load(f)
+    except (FileNotFoundError, ValueError, OSError):
+        saved = {}
+    return _clean_settings(_deep_merge(DEFAULTS, saved))
+
+
+def _save_settings():
+    try:
+        path = _settings_path()
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(STATE, f, indent=2)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        app.log('{}: could not save settings:\n{}'.format(ADDIN_TITLE, traceback.format_exc()))
+        return False
+
+
+STATE = _load_settings()
+_update_info = {'state': 'unchecked', 'current': VERSION}
+_update_event = [None]
+_last_update_check = [0.0]
+_cmd_created = []             # (command definition, handler) to detach in stop()
 
 # The topmost element of every path. The root component's real name is noise
 # here - it's the same on every row - so paths read "root / Frame:1 / Rail".
@@ -1225,6 +1343,7 @@ class TablePaletteClosedHandler(adsk.core.UserInterfaceGeneralEventHandler):
         super().__init__()
 
     def notify(self, args):
+        _save_settings()
         try:
             legend = _legend_palette()
             if legend and _safe(lambda: legend.isVisible, False):
@@ -1760,9 +1879,170 @@ def _check_ui_version(reported):
              'err')
 
 
+# ---------------------------------------------------------------------------
+# Update check and self-update (ported from Export Selected to DXF)
+# ---------------------------------------------------------------------------
+def _vtuple(v):
+    return tuple(int(x) for x in re.findall(r'\d+', str(v))[:3]) or (0,)
+
+
+def _short_error(ex):
+    text = str(ex).strip()
+    return text.splitlines()[-1] if text else type(ex).__name__
+
+
+def _fire_update(info):
+    try:
+        app.fireCustomEvent(UPDATE_EVENT_ID, json.dumps(info))
+    except Exception:
+        pass
+
+
+def _check_update_thread():
+    """Runs off the main thread: fetch version.json, then hand the result back
+    to Fusion's main thread through a custom event (the API is not thread-safe)."""
+    info = {'state': 'error', 'current': VERSION}
+    try:
+        req = urllib.request.Request(VERSION_URL + '?t=%d' % int(time.time()),
+                                     headers={'User-Agent': TOOL_NAME + '/' + VERSION,
+                                              'Cache-Control': 'no-cache'})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode('utf-8'))
+        latest = str(data.get('version', '')).strip()
+        info = {'current': VERSION, 'latest': latest,
+                'state': 'newer' if _vtuple(latest) > _vtuple(VERSION) else 'current',
+                'zip': data.get('zip') or DOWNLOAD_URL,
+                'dashboard': data.get('dashboard') or DASHBOARD_URL,
+                'notes': data.get('notes', ''), 'date': data.get('date', '')}
+    except Exception as ex:
+        info['error'] = _short_error(ex)
+    _fire_update(info)
+
+
+def _start_update_check():
+    global _update_info
+    _last_update_check[0] = time.time()
+    _update_info = {'state': 'checking', 'current': VERSION}
+    _push('update', _update_info)
+    threading.Thread(target=_check_update_thread, daemon=True).start()
+
+
+def _apply_update(zip_bytes, target_dir, backup_root, current_version, tool_name=TOOL_NAME):
+    """Check the package, back up target_dir, then overwrite its files with the
+    zip's. Pure Python (no Fusion API). Returns (new_version, backup_dir)."""
+    try:
+        z = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        raise RuntimeError('the download was not a zip file (GitHub may be unreachable; try again later)')
+    prefix = tool_name + '/'
+    names = [n for n in z.namelist() if n.startswith(prefix) and not n.endswith('/')]
+    main_py, manifest = prefix + tool_name + '.py', prefix + tool_name + '.manifest'
+    if main_py not in names or manifest not in names:
+        raise RuntimeError('the download is not a %s package' % tool_name)
+    for n in names:
+        parts = n[len(prefix):].split('/')
+        if any(part in ('', '..') for part in parts) or ':' in n or n.startswith('/'):
+            raise RuntimeError('the download contains an unsafe path: %s' % n)
+    m = re.search(r"^VERSION\s*=\s*'([^']+)'", z.read(main_py).decode('utf-8'), re.M)
+    new_version = m.group(1) if m else ''
+    if _vtuple(new_version) <= _vtuple(current_version):
+        raise RuntimeError('the download (v%s) is not newer than v%s' % (new_version or '?', current_version))
+    if not os.access(target_dir, os.W_OK):
+        raise RuntimeError('the add-in folder is not writable: %s' % target_dir)
+    backup = os.path.join(backup_root, 'backup-v' + current_version)
+    if os.path.exists(backup):
+        shutil.rmtree(backup)
+    shutil.copytree(target_dir, backup, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    try:
+        for n in names:
+            dest = os.path.join(target_dir, *n[len(prefix):].split('/'))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            tmp = dest + '.updating'
+            with open(tmp, 'wb') as f:
+                f.write(z.read(n))
+            os.replace(tmp, dest)
+            if dest.endswith('.command'):
+                os.chmod(dest, 0o755)
+    except Exception:
+        shutil.copytree(backup, target_dir, dirs_exist_ok=True)   # put the old files back
+        raise
+    return new_version, backup
+
+
+def _install_update_thread(info):
+    try:
+        req = urllib.request.Request(DOWNLOAD_URL, headers={'User-Agent': TOOL_NAME + '/' + VERSION})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = r.read()
+        here = os.path.dirname(os.path.realpath(__file__))
+        new_version, backup = _apply_update(data, here, _data_dir(), VERSION)
+        info.update({'state': 'installed', 'installed': new_version, 'backup': backup})
+    except Exception as ex:
+        info.update({'state': 'installFailed', 'error': _short_error(ex)})
+    _fire_update(info)
+
+
+def _start_install_update():
+    global _update_info
+    latest = _update_info.get('latest', '')
+    res = ui.messageBox('Install {} v{} now?\n\nIt replaces this add-in\'s files with the latest '
+                        'version from GitHub. Your current version is backed up first, and your '
+                        'settings and keyboard shortcut are kept.'.format(ADDIN_TITLE, latest or 'latest'),
+                        ADDIN_TITLE, adsk.core.MessageBoxButtonTypes.YesNoButtonType)
+    if res != adsk.core.DialogResults.DialogYes:
+        return {'ok': True, 'started': False}
+    _log('Installing update v{}...'.format(latest or 'latest'), 'info')
+    _update_info = dict(_update_info, state='installing')
+    _push('update', _update_info)
+    threading.Thread(target=_install_update_thread, args=(dict(_update_info),), daemon=True).start()
+    return {'ok': True, 'started': True}
+
+
+def _open_url(url):
+    try:
+        if webbrowser.open(url):
+            return
+    except Exception:
+        pass
+    if sys.platform == 'darwin':
+        subprocess.Popen(['open', url])
+    elif os.name == 'nt':
+        os.startfile(url)
+
+
+class UpdateInfoHandler(adsk.core.CustomEventHandler):
+    """Back on Fusion's main thread with the result of a check or an install."""
+
+    def __init__(self):
+        super().__init__()
+
+    def notify(self, args):
+        global _update_info
+        try:
+            info = json.loads(args.additionalInfo or '{}')
+            _update_info = info
+            state = info.get('state')
+            if state == 'newer':
+                _log('Version {} is available (you have {}).'.format(info.get('latest'), VERSION), 'ok')
+            elif state == 'current':
+                _log('Up to date (v{}).'.format(VERSION), 'sys')
+            elif state == 'error':
+                _log('Could not check for updates: {}'.format(info.get('error', '?')), 'warn')
+            elif state == 'installed':
+                _log('Installed v{}. Open Scripts and Add-Ins (Shift+S, or UTILITIES > ADD-INS > '
+                     'Scripts and Add-Ins) and turn SelectionInspector\'s Run switch off, then on. '
+                     'Backup of v{}: {}'.format(info.get('installed'), VERSION, info.get('backup')), 'ok')
+            elif state == 'installFailed':
+                _log('The update could not be installed: {}'.format(info.get('error', '?')), 'err')
+            _push('update', info)
+        except Exception:
+            app.log('{}: update event failed:\n{}'.format(ADDIN_TITLE, traceback.format_exc()))
+
+
 def _handle_message(action, data_str):
     """Returns a JSON-serialisable dict for the palette. Raises UserError for
     expected problems so the boundary can report them without a traceback."""
+    global STATE
     data = {}
     if data_str:
         try:
@@ -1776,7 +2056,55 @@ def _handle_message(action, data_str):
             _check_ui_version(str(data.get('uiVersion')))
         if 'subEntities' in data:
             _include_sub = bool(data.get('subEntities'))
-        return _payload_full()
+        result = _payload_full()
+        if action == 'ready':
+            result['settings'] = STATE
+            result['settingsFile'] = os.path.exists(_settings_path())
+            result['update'] = _update_info
+            result['links'] = {'docs': DASHBOARD_URL, 'releases': RELEASES_URL, 'download': DOWNLOAD_URL}
+            if STATE['options'].get('checkUpdates') and \
+                    time.time() - _last_update_check[0] > UPDATE_RECHECK_S:
+                _start_update_check()
+        return result
+
+    if action == 'saveSettings':
+        merged = _deep_merge(STATE, data)
+        # Widths arrive complete (only non-default columns), so replace them
+        # rather than merge - otherwise a column put back to its default
+        # would keep its old saved width.
+        if isinstance((data.get('prefs') or {}).get('widths'), dict):
+            merged['prefs']['widths'] = data['prefs']['widths']
+        STATE = _clean_settings(merged)
+        return {'ok': _save_settings(), 'settings': STATE}
+
+    if action == 'resetSettings':
+        res = ui.messageBox('Reset Selection Inspector to its defaults?\n\n'
+                            'Column widths, sort order, log height, copy mode and the update '
+                            'check go back to how they were on first install, and the palette '
+                            'returns to its opening state. This cannot be undone.',
+                            ADDIN_TITLE, adsk.core.MessageBoxButtonTypes.YesNoButtonType)
+        if res != adsk.core.DialogResults.DialogYes:
+            return {'ok': True, 'reset': False}
+        STATE = copy.deepcopy(DEFAULTS)
+        saved = _save_settings()
+        _log('Settings reset to defaults.' if saved else
+             'Settings reset for this session, but the file could not be saved.',
+             'ok' if saved else 'err')
+        return {'ok': True, 'reset': True, 'settings': STATE}
+
+    if action == 'checkUpdate':
+        _start_update_check()
+        return {'ok': True}
+
+    if action == 'installUpdate':
+        return _start_install_update()
+
+    if action == 'openUrl':
+        url = str(data.get('url', ''))
+        if not url.startswith('https://'):
+            raise UserError('Not a web link: ' + url)
+        _open_url(url)
+        return {'ok': True}
 
     if action == 'loadSub':
         owner_id = data.get('ownerId')
@@ -2265,6 +2593,15 @@ def run(context):
         on_created = CommandCreatedHandler()
         cmd_def.commandCreated.add(on_created)
         handlers.append(on_created)
+        _cmd_created.append((cmd_def, on_created))
+
+        # Update checks run on a worker thread and report back through this
+        # custom event, because the Fusion API may only be used on the main thread.
+        _safe(lambda: app.unregisterCustomEvent(UPDATE_EVENT_ID))
+        _update_event[0] = app.registerCustomEvent(UPDATE_EVENT_ID)
+        on_update = UpdateInfoHandler()
+        _update_event[0].add(on_update)
+        handlers.append(on_update)
 
         _placed_panels[:] = _place_button(cmd_def)
         if not _placed_panels:
@@ -2317,8 +2654,16 @@ def stop(context):
 
         # The command definition is deliberately left registered. Deleting it
         # would take the user's keyboard shortcut with it, and Fusion is happy
-        # for it to outlive the add-in: run() reuses it, and the handlers that
-        # drive it are released below, so a stopped add-in does nothing.
+        # for it to outlive the add-in: run() reuses it. Its commandCreated
+        # handler is detached here, so a Stop then Run never leaves two
+        # handlers answering one click.
+        for cmd_def, handler in _cmd_created:
+            _safe(lambda d=cmd_def, h=handler: d.commandCreated.remove(h))
+        _cmd_created.clear()
+        if _update_event[0] is not None:
+            _safe(lambda: app.unregisterCustomEvent(UPDATE_EVENT_ID))
+            _update_event[0] = None
+        _save_settings()
         handlers.clear()
         _flash_clear()
         _entity_map.clear()

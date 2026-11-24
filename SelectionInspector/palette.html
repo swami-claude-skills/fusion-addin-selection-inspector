@@ -4,11 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Selection Inspector</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
+  color-scheme:dark;
   --bg:#0d0d0f; --panel:#141418; --panel-2:#1a1a20;
   --cyan:#00e5ff; --green:#00ff88; --amber:#ffb020; --yellow:#ffe14d; --pink:#ff5c7a; --violet:#7c5cff;
   --text:#e8e8ec; --text-dim:#9aa0aa; --text-mute:#6a6f78; --border:#26262e;
@@ -457,12 +455,36 @@ footer a{color:var(--cyan); text-decoration:none;}
 }
 #toast.show{opacity:1;}
 #toast.good{background:#0c2119;border-color:rgba(0,255,136,.45);color:#c9ffe6;}
+/* Errors from either side land here as well as in the log, because a docked
+   panel that silently does nothing is the hardest failure to diagnose.
+   Click to dismiss. */
+#errstrip{
+  display:none; flex:0 0 auto; padding:7px 12px; cursor:pointer;
+  background:#2a0d14; border-bottom:1px solid var(--pink); color:#ffc2cf;
+  font-family:var(--mono); font-size:11px; white-space:pre-wrap; word-break:break-word;
+}
+#errstrip b{ color:var(--pink); margin-right:6px; }
+/* A newer version on GitHub. */
+#updbar{
+  display:none; flex:0 0 auto; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:7px 12px; background:#0c2119; border-bottom:1px solid var(--green);
+  color:#c9ffe6; font-family:var(--mono); font-size:11px;
+}
+#updbar .msg{ flex:1 1 auto; min-width:0; }
+#updbar button{
+  flex:0 0 auto; font-family:var(--mono); font-size:10px; padding:3px 9px;
+  border-radius:4px; cursor:pointer;
+  color:var(--bg); background:var(--green); border:1px solid var(--green);
+}
+#updbar button.ghost{ color:#c9ffe6; background:transparent; border-color:rgba(0,255,136,.5); }
+#updbar button:disabled{ opacity:.45; cursor:default; }
 body.resizing{cursor:col-resize;}
 body.resizing-v{cursor:row-resize;}
 </style>
 </head>
 <body>
 
+<div id="errstrip" title="Click to dismiss"><b>ERROR</b><span class="msg"></span></div>
 
 <div class="tabbar">
   <button class="tab on" data-tab="list"   title="What the table lists">List</button>
@@ -498,7 +520,6 @@ body.resizing-v{cursor:row-resize;}
 
 <div class="toolbar tabpanel" id="tab-cols" style="display:none">
   <button id="btnFit" title="Fit every column to its widest entry">Fit columns</button>
-  <button id="btnReset" title="Restore default column widths and sort order">Reset</button>
 </div>
 
 <div class="toolbar tabpanel" id="tab-tools" style="display:none">
@@ -506,6 +527,18 @@ body.resizing-v{cursor:row-resize;}
   <div class="sep"></div>
   <button id="btnLegend" title="Open the Qty color legend in its own window">Legend</button>
   <button id="btnLog" title="Show or hide the log pane">Log</button>
+  <div class="sep"></div>
+  <button id="btnUpdCheck" title="Check GitHub for a newer version now">Check for updates</button>
+  <button id="btnDocs" title="Open the documentation in your web browser">Docs</button>
+  <button id="btnReset" title="Restore every setting to its default: column widths, sort order, log height, copy mode, the update check, and the opening state. Asks first.">Reset all</button>
+</div>
+
+<div id="updbar">
+  <span class="msg"></span>
+  <button id="updInstall" title="Download the latest version from GitHub and install it over this one">Install update</button>
+  <button id="updDl" class="ghost" title="Download the zip in your web browser">Download</button>
+  <button id="updWhat" class="ghost" title="Open the release notes">What's new</button>
+  <button id="updX" class="ghost" title="Hide this until the palette is opened again">Dismiss</button>
 </div>
 
 <div id="fitbar" style="display:none">
@@ -573,7 +606,7 @@ body.resizing-v{cursor:row-resize;}
    new version while the UI on screen is old. Nothing visible distinguished
    those two situations, and "the fix did nothing" is exactly what it looks
    like. Now Python compares them and reloads the page if they differ. */
-const UI_VERSION = '2.36.6';
+const UI_VERSION = '2.37.0';
 
 const COLS = [
   {key:'visible', label:'Show',   kind:'bool', def:58,  min:50,  fit:false},
@@ -887,6 +920,7 @@ window.fusionJavaScriptHandler = {
         if(typeof data.stale === 'boolean') setStale(data.stale);
       }
       else if(action === 'log'){ logLine(data.message, data.level || ''); }
+      else if(action === 'update'){ applyUpdate(data); }
       return JSON.stringify({status:'OK'});
     }catch(e){
       toast('UI error: ' + e.toString());
@@ -2151,15 +2185,88 @@ function fitAll(){
     showFitBar('Every column already fits its content \u2014 nothing to change.', 'done');
   }
 }
+/* Reset restores everything: preferences (widths, log height, copy mode),
+   the sort, and the opening state (List tab, log hidden, filters and toggles
+   off). Python asks for confirmation first and rewrites the settings file. */
 function resetAll(){
+  if(!connected){ applyDefaults(); logLine('Reset to defaults (preview).', 'ok'); return; }
+  send('resetSettings', {}).then(res => {
+    if(!res || res.ok === false){ showErr((res && res.error) || 'Reset failed.'); return; }
+    if(!res.reset) return;                      // answered No
+    applyDefaults(res.settings);
+  });
+}
+function applyDefaults(settings){
+  const p = (settings && settings.prefs) || {};
   widths = COLS.map((c,i) => clampW(i, c.def));
   sortKey = null; sortDir = 1;
-  paintSortIndicators(); applyWidths(); render(); saveWidths();
+  logHeight = typeof p.logHeight === 'number' ? p.logHeight : 150;
+  copyMode = p.copyMode === 'plain' ? 'plain' : 'color';
+  try{
+    window.localStorage.removeItem('si.widths');
+    window.localStorage.removeItem('si.log');
+  }catch(e){}
+  if(selectedOnly) $('btnSelOnly').click();
+  if(subEntities) $('btnSub').click();
+  if(revealSelected) $('btnReveal').click();
+  $('filter').value = ''; paintFilterClear();
+  $('typeFilter').value = '';
+  setLogVisible(false);
+  setTab('list');
+  applyCopyMode(); applyLogHeight();
+  paintSortIndicators(); applyWidths(); render();
+  hideErr();
 }
 
-/* remember widths between sessions where storage is available */
+/* Preferences live in a settings file kept by Python outside the add-in
+   folder, so a reinstall or a cleared webview cache keeps them. Browser
+   storage is only the fallback for the standalone preview. */
+function prefsPayload(){
+  const w = {};
+  COLS.forEach((c,i) => { if(widths[i] !== c.def) w[c.key] = Math.round(widths[i]); });
+  return {prefs:{widths:w, logHeight:Math.round(logHeight), copyMode:copyMode}};
+}
+let settingsTimer = null;
+function saveSettingsSoon(){
+  if(!connected) return;
+  clearTimeout(settingsTimer);
+  settingsTimer = setTimeout(() => {
+    send('saveSettings', prefsPayload()).then(res => {
+      if(res && res.ok === false) showErr(res.error || 'Could not save settings.');
+    });
+  }, 400);
+}
+function applySettings(settings){
+  const p = (settings && settings.prefs) || {};
+  if(p.widths && typeof p.widths === 'object'){
+    widths = COLS.map((c,i) => clampW(i, typeof p.widths[c.key] === 'number' ? p.widths[c.key] : c.def));
+  }
+  if(typeof p.logHeight === 'number') logHeight = p.logHeight;
+  if(p.copyMode === 'color' || p.copyMode === 'plain') copyMode = p.copyMode;
+  applyCopyMode(); applyLogHeight(); applyWidths(); render();
+}
+/* Extra fields only the first 'ready' reply carries. */
+let LINKS = {};
+function applyReady(res){
+  if(!res || res.ok === false) return;
+  if(res.links) LINKS = res.links;
+  if(res.settings){
+    if(res.settingsFile){
+      applySettings(res.settings);
+    } else {
+      // First run with a settings file: carry over what browser storage had.
+      loadWidths(); loadPrefs(); applyCopyMode(); applyLogHeight(); applyWidths(); render();
+      send('saveSettings', prefsPayload());
+      logLine('Settings now saved to a file, so reinstalling keeps them.', 'sys');
+    }
+  }
+  if(res.update) applyUpdate(res.update);
+}
+
+/* remember widths between sessions */
 function saveWidths(){
   try{ window.localStorage.setItem('si.widths', JSON.stringify(widths)); }catch(e){}
+  saveSettingsSoon();
 }
 /* Not restored, for the same reason the tab and the log are not: Reveal is
    part of the opening state, and the opening state is "everything off". */
@@ -2622,7 +2729,60 @@ let logVisible = false;       // off by default; the toggle and prefs can turn i
 let legendVisible = false;    // mirrors the legend palette, owned by Fusion
 let copyMode = 'color';       // 'color' keeps the level colors; 'plain' is text only
 
+function showErr(message){
+  const strip = $('errstrip');
+  strip.querySelector('.msg').textContent = String(message);
+  strip.style.display = 'block';
+}
+function hideErr(){ $('errstrip').style.display = 'none'; }
+$('errstrip').addEventListener('click', hideErr);
+window.addEventListener('error', e => {
+  showErr('Palette script error: ' + (e.message || e) + (e.lineno ? ' (line ' + e.lineno + ')' : ''));
+});
+
+let UPD = {}, updDismissed = false;
+function applyUpdate(info){
+  UPD = info || {};
+  const bar = $('updbar'), msg = bar.querySelector('.msg');
+  const st = UPD.state;
+  const show = !updDismissed && (st === 'newer' || st === 'installing' || st === 'installed' || st === 'installFailed');
+  bar.style.display = show ? 'flex' : 'none';
+  $('updInstall').disabled = (st === 'installing' || st === 'installed');
+  $('updInstall').style.display = (st === 'installed') ? 'none' : '';
+  if(st === 'newer'){
+    msg.textContent = 'Version ' + UPD.latest + ' is available (you have ' + UPD.current + ').' +
+                      (UPD.notes ? ' ' + UPD.notes : '');
+  } else if(st === 'installing'){
+    msg.textContent = 'Installing version ' + (UPD.latest || '') + '...';
+  } else if(st === 'installed'){
+    msg.textContent = 'Version ' + UPD.installed + ' is installed. Open Scripts and Add-Ins (Shift+S, or ' +
+                      'UTILITIES > ADD-INS > Scripts and Add-Ins) and turn SelectionInspector\'s Run switch off, then on.';
+  } else if(st === 'installFailed'){
+    msg.textContent = 'The update could not be installed: ' + (UPD.error || '?') + ' Use Download instead.';
+  }
+  const btn = $('btnUpdCheck');
+  btn.disabled = (st === 'checking' || st === 'installing');
+  btn.textContent = st === 'checking' ? 'Checking...' : 'Check for updates';
+}
+function openUrl(url){
+  if(!url) return;
+  if(connected) send('openUrl', {url:url}).then(res => { if(res && res.ok === false) showErr(res.error); });
+  else window.open(url, '_blank');
+}
+$('updInstall').addEventListener('click', () => send('installUpdate', {}));
+$('updDl').addEventListener('click', () => openUrl(UPD.zip || LINKS.download));
+$('updWhat').addEventListener('click', () => openUrl(LINKS.releases));
+$('updX').addEventListener('click', () => { updDismissed = true; applyUpdate(UPD); });
+$('btnUpdCheck').addEventListener('click', () => {
+  if(!connected){ logLine('Not connected to Fusion - this is the standalone preview.', 'warn'); return; }
+  updDismissed = false;
+  send('checkUpdate', {});
+});
+$('btnDocs').addEventListener('click', () =>
+  openUrl(LINKS.docs || 'https://swami-claude-skills.github.io/fusion-addin-selection-inspector/'));
+
 function logLine(message, level){
+  if(level === 'err') showErr(message);
   const body = $('logbody');
   const now = new Date();
   const stamp = [now.getHours(), now.getMinutes(), now.getSeconds()]
@@ -2867,6 +3027,7 @@ function savePrefs(){
   try{
     window.localStorage.setItem('si.log', JSON.stringify({h:logHeight, copy:copyMode}));
   }catch(e){}
+  saveSettingsSoon();
 }
 function loadPrefs(){
   try{
@@ -2921,7 +3082,7 @@ function boot(){
   render('Connecting to Fusion…');
 
   // Keep polling for up to ~12s; the moment the bridge appears, load real data.
-  waitForBridge(120, () => { if(connected) send('ready', {subEntities:subEntities, uiVersion:UI_VERSION}).then(applyData); });
+  waitForBridge(120, () => { if(connected) send('ready', {subEntities:subEntities, uiVersion:UI_VERSION}).then(res => { applyData(res); applyReady(res); }); });
 
   // If it hasn't shown up quickly we're almost certainly in a browser, so drop
   // to the standalone preview dataset. A late bridge still overrides this.
@@ -2958,7 +3119,7 @@ function demoReply(action, data){
       ['Point 1','Sketch Point',2,'root / Frame:1 / Base Profile / Point 1','2 occurrences',true]
     ];
     // 3 picked directly, 4 matched through a picked face -> 3 raw entities, 2 rows
-    return {ok:true, version:'2.36.6', document:'preview.f3d (standalone)',
+    return {ok:true, version:'2.37.0', document:'preview.f3d (standalone)',
       selected:[3,4,10], selCount:4, subEntities:true, subCount:5, truncated:false,
       sketchState:{inSketch:false, sketch:''},
       timeline:{available:true, position:12, count:34},

@@ -34,6 +34,6 @@ Pick ONE of the three ways below.
    5) In Fusion, open Scripts and Add-Ins: press Shift+S, or click the UTILITIES tab, open the ADD-INS drop-down and choose Scripts and Add-Ins. Select SelectionInspector under Add-Ins and turn on Run and Run on Startup.
 
 UPDATING
-   Download the new SelectionInspector.zip and install it the same way. Your keyboard
-   shortcut is kept. Then in Scripts and Add-Ins turn the Run switch for
-   SelectionInspector off, then on (or restart Fusion).
+   When a newer version is out, the palette shows a green bar. Click "Install update",
+   then in Scripts and Add-Ins turn the Run switch for SelectionInspector off, then on.
+   Your keyboard shortcut and settings are kept.

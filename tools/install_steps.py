@@ -46,9 +46,9 @@ METHODS = [
 
 
 UPDATING = ['UPDATING',
-            '   Download the new SelectionInspector.zip and install it the same way. Your keyboard',
-            '   shortcut is kept. Then in Scripts and Add-Ins turn the Run switch for',
-            '   SelectionInspector off, then on (or restart Fusion).']
+            '   When a newer version is out, the palette shows a green bar. Click "Install update",',
+            '   then in Scripts and Add-Ins turn the Run switch for SelectionInspector off, then on.',
+            '   Your keyboard shortcut and settings are kept.']
 
 
 def h(s):
