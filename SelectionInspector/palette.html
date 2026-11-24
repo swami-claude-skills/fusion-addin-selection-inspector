@@ -1,0 +1,2989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Selection Inspector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0d0d0f; --panel:#141418; --panel-2:#1a1a20;
+  --cyan:#00e5ff; --green:#00ff88; --amber:#ffb020; --yellow:#ffe14d; --pink:#ff5c7a; --violet:#7c5cff;
+  --text:#e8e8ec; --text-dim:#9aa0aa; --text-mute:#6a6f78; --border:#26262e;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--sans); font-size:12.5px;
+  display:flex; flex-direction:column; overflow:hidden;
+  -webkit-user-select:none; user-select:none;
+}
+
+/* No in-page header: the palette's own title bar carries the name and version,
+   so every pixel here goes to the table. The document name lives in the footer. */
+
+/* ---------- tabs ---------- */
+.tabbar{
+  display:flex; align-items:stretch; gap:2px; flex:0 0 auto;
+  padding:0 8px; background:var(--panel); border-bottom:1px solid var(--border);
+}
+.tabbar .tab{
+  border:0; border-bottom:2px solid transparent; border-radius:0;
+  background:transparent; color:var(--text-dim);
+  padding:7px 12px 6px; font-size:10.5px;
+}
+.tabbar .tab:hover{color:var(--text); background:rgba(255,255,255,.03);}
+.tabbar .tab.on{color:var(--cyan); border-bottom-color:var(--cyan); background:rgba(0,229,255,.06);}
+.tabbar .tabgap{flex:1 1 auto;}
+.tabbar #btnRefresh{align-self:center;}
+/* Stale means: the model has changed and this table has not caught up. It is
+   announced twice on purpose - on the button you would press, and in the
+   status bar where the counts it invalidates are shown. */
+.tabbar #btnRefresh.stale{
+  color:var(--amber); border-color:rgba(255,176,32,.65); background:rgba(255,176,32,.12);
+  animation:stalePulse 1.6s ease-in-out infinite;
+}
+@keyframes stalePulse{50%{background:rgba(255,176,32,.24);}}
+footer #statStale{
+  color:var(--amber); border:1px solid rgba(255,176,32,.45); background:rgba(255,176,32,.09);
+  padding:1px 7px; border-radius:3px; font-size:9px; letter-spacing:.09em; text-transform:uppercase;
+}
+
+/* ---------- toolbar ---------- */
+.toolbar{
+  display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+  padding:8px 12px; background:var(--panel-2);
+  border-bottom:1px solid var(--border); flex:0 0 auto;
+}
+button, select, input[type=text]{
+  font-family:var(--mono); font-size:10.5px; color:var(--text);
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:4px; padding:5px 9px; outline:none;
+}
+button{cursor:pointer; letter-spacing:.04em; text-transform:uppercase;}
+button:hover{border-color:var(--cyan); color:var(--cyan);}
+button:active{transform:translateY(1px);}
+button.primary{border-color:rgba(0,229,255,.45); color:var(--cyan);}
+button.on{background:var(--cyan); border-color:var(--cyan); color:#06212a; font-weight:700;}
+/* Disabled but still legible: a dashed outline reads as "not available now"
+   without dimming the label into the background. */
+button:disabled{
+  opacity:1; cursor:not-allowed;
+  color:#9198a4; background:#20222a;
+  border:1px dashed #565d6b;
+}
+button:disabled:hover{border-color:#565d6b; color:#9198a4; background:#20222a;}
+button:disabled:active{transform:none;}
+button#btnSelOnly b{font-weight:700; opacity:.75; margin-left:3px;}
+button#btnSelOnly.on b{opacity:1;}
+.fieldwrap{position:relative; display:inline-flex; flex:1 1 170px; min-width:170px;}
+.fieldwrap input[type=text]{flex:1 1 auto; padding-right:22px; min-width:0;}
+#btnClearFilter{
+  position:absolute; right:3px; top:50%; transform:translateY(-50%);
+  display:none; padding:0; width:16px; height:16px; line-height:14px;
+  border:0; background:transparent; color:var(--text-mute);
+  font-size:14px; text-transform:none; letter-spacing:0; border-radius:3px;
+}
+#btnClearFilter:hover{color:var(--cyan); background:rgba(0,229,255,.12);}
+#btnClearFilter:active{transform:translateY(-50%);}
+.fieldwrap.has-text #btnClearFilter{display:block;}
+input[type=text]{min-width:150px; flex:1 1 150px; text-transform:none; -webkit-user-select:text; user-select:text;}
+input[type=text]::placeholder{color:var(--text-mute);}
+input[type=text]:focus, select:focus{border-color:var(--cyan);}
+.sep{width:1px; height:20px; background:var(--border); margin:0 2px;}
+/* segmented radio group. The checked state is driven by a JS-applied class
+   rather than :has(), which older CEF builds don't support. */
+.radios{display:inline-flex; border:1px solid #4a505c; border-radius:4px; overflow:hidden;}
+.radios label{
+  font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.04em;
+  padding:5px 10px; cursor:pointer; color:var(--text); background:#20222a;
+  display:inline-flex; align-items:center; gap:6px; user-select:none;
+}
+.radios label + label{border-left:1px solid #4a505c;}
+.radios label:hover{background:#2a2d37;}
+/* Active segment is a solid fill, so which one is on reads at a glance. */
+.radios label.on{color:#06212a; background:var(--cyan); font-weight:700;}
+.radios input{
+  appearance:none; -webkit-appearance:none; margin:0;
+  width:11px; height:11px; border-radius:50%;
+  border:2px solid #8e96a3; background:transparent;
+}
+.radios label.on input{border-color:#06212a; background:#06212a; box-shadow:inset 0 0 0 2px var(--cyan);}
+.spacer{flex:1 1 auto;}
+
+/* ---------- table ---------- */
+.table-wrap{
+  /* min-height:0 is load-bearing. A flex item defaults to min-height:auto, so
+     a tall table refuses to shrink and pushes whatever follows it - the log
+     pane and the footer - past the bottom of the window, where body's
+     overflow:hidden makes them invisible. */
+  flex:1 1 auto; min-height:0; overflow:auto; background:var(--bg);
+  scrollbar-color:#33333d var(--bg);
+}
+.table-wrap::-webkit-scrollbar{width:11px;height:11px;}
+.table-wrap::-webkit-scrollbar-thumb{background:#31313a;border-radius:6px;border:2px solid var(--bg);}
+.table-wrap::-webkit-scrollbar-track{background:var(--bg);}
+/* Every width in this table is an explicit pixel value written by
+   applyWidths - no intrinsic sizing, no percentage minimum, no auto column.
+
+   The reason: a fixed-layout table whose used width exceeds the sum of its
+   columns hands the excess back to the columns. That one behavior produced
+   every resizing complaint at once - a column that would not shrink because
+   the freed space came straight back to it, several columns moving when you
+   dragged one, and Fit columns appearing to do nothing. Parking the excess in
+   a trailing auto-width spacer fixes it on a current engine, but how the
+   excess gets split is precisely what older Chromium builds disagree on, and
+   Fusion's CEF is old enough that we already avoid :has() for it.
+
+   So there is never any excess to distribute: applyWidths measures the pane,
+   hands the leftover to the spacer as a hard pixel width, and sets the table
+   to the exact total. Nothing is left to the layout algorithm's discretion. */
+table{border-collapse:separate; border-spacing:0; table-layout:fixed;}
+th.c-pad, td.c-pad{padding:0; overflow:hidden;}
+thead th{
+  position:sticky; top:0; z-index:3;
+  background:var(--panel-2); color:var(--text-dim);
+  font-family:var(--mono); font-size:9.5px; font-weight:500;
+  letter-spacing:.1em; text-transform:uppercase; text-align:left;
+  padding:7px 10px; border-bottom:1px solid var(--border);
+  white-space:nowrap; overflow:hidden; cursor:pointer; user-select:none;
+}
+thead th:hover{color:var(--text);}
+thead th.sorted{color:var(--cyan);}
+th .lbl{pointer-events:none;}
+th .arrow{font-size:8px; margin-left:4px; opacity:.85; pointer-events:none;}
+th .rz{
+  position:absolute; top:0; right:0; width:7px; height:100%;
+  cursor:col-resize; z-index:4;
+}
+th .rz:hover{background:linear-gradient(to right,transparent,rgba(0,229,255,.55));}
+tbody td{
+  padding:5px 10px; border-bottom:1px solid #1c1c22;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  vertical-align:middle;
+}
+/* Striping is by absolute row index, written into the class. nth-child would
+   stripe by position in the DOM, and the DOM now holds a sliding window of
+   rows rather than all of them - stripes would crawl as you scroll. */
+tbody tr.alt{background:rgba(255,255,255,.014);}
+/* The two rows that stand in for everything above and below the window. They
+   exist to give the scrollbar the right length and must never look or behave
+   like a row. */
+tbody tr.spacer{background:none; pointer-events:none;}
+tbody tr.spacer td{padding:0; border:0;}
+tbody tr{cursor:default;}
+tbody tr:hover{background:rgba(0,229,255,.04);}
+tbody tr.sel{background:rgba(0,229,255,.13);}
+/* The row whose entity is blinking in the viewport. Distinct from .sel, which
+   means "picked in Fusion" - flashing changes nothing about the selection. */
+tbody tr.flashing{ box-shadow:inset 0 0 0 1px rgba(255,225,77,.55); }
+tbody tr.flashing td.c-name{ color:var(--yellow); }
+tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--cyan);}
+/* group header + its children */
+tbody tr.grp{background:#191921; cursor:pointer;}
+tbody tr.grp:hover{background:#22222c;}
+tbody tr.grp td.c-name{color:var(--text); font-family:var(--mono); font-size:11px;}
+tbody tr.grp td.c-qty{color:var(--text-dim);}
+/* Caret and label are flex items, so a fixed-width caret sitting beside
+   ellipsized text can never push the text onto a second line. */
+td.c-name .nm{display:flex; align-items:center; min-width:0;}
+td.c-name .txt{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;}
+/* Path text lives in a block span for the same reason the name does: the span
+   fills the cell's content box, so its clientWidth is the width the text has to
+   fit into - which is what middle truncation needs to measure against. The CSS
+   ellipsis stays as the fallback for any cell squeeze() hasn't reached yet
+   (offscreen rows, or a browser with no canvas), so text is never simply cut. */
+td.c-path .txt{display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+th .pfx{
+  margin-left:5px; padding:0 4px; border-radius:3px; cursor:help;
+  color:var(--cyan); border:1px solid rgba(0,229,255,.3); background:rgba(0,229,255,.07);
+}
+/* "This column is hiding something." Deliberately a marker and not an action:
+   a column that resizes itself moves the rest of the table under your cursor,
+   which is exactly the behavior that made resizing feel broken before. */
+th .fitflag{
+  margin-left:6px; padding:1px 5px; border-radius:3px; cursor:pointer;
+  font-size:9px; line-height:1.3; letter-spacing:.08em; font-weight:500;
+  color:var(--bg); border:1px solid var(--amber); background:var(--amber);
+}
+th .fitflag:hover{ color:var(--bg); background:var(--amber); border-color:var(--amber); }
+/* The marker reads FIT, in words. It was U+2922 (Miscellaneous Symbols
+   and Arrows) and reportedly rendered as nothing at all - that block has poor
+   coverage in monospace faces, and Fusion's CEF is old enough that its font
+   fallback cannot be relied on. A marker you have to hope renders is not a
+   marker. Everything drawn here is now ASCII.
+
+   It also flashes three times when it first appears - long enough to catch the
+   eye, short enough to be over before it nags - then sits quietly. It flashes
+   again only when a column starts hiding text that wasn't hidden before, never
+   on a scroll or a redraw. */
+@keyframes fitFlash{
+  0%, 100%{ background:var(--amber); box-shadow:none; }
+  50%     { background:#fff; box-shadow:0 0 0 3px rgba(255,176,32,.55); }
+}
+th .fitflag.flash{ animation:fitFlash .42s ease-in-out 3; }
+
+/* The notice itself. A toast was the wrong container: bottom-center, small,
+   low contrast, and gone in five seconds - by which time you are looking at
+   the table, which is at the top. This sits directly above the columns it is
+   talking about and stays until it is dealt with. */
+#fitbar{
+  flex:0 0 auto; display:flex; align-items:center; gap:10px;
+  padding:7px 12px; background:#3a2a08; border-bottom:1px solid var(--amber);
+  color:#ffe6bd; font-family:var(--mono); font-size:11px;
+}
+#fitbar .warnmark{
+  flex:0 0 auto; padding:1px 6px; border-radius:3px; font-size:9px;
+  letter-spacing:.1em; font-weight:500; color:var(--bg); background:var(--amber);
+}
+#fitbar .msg{ flex:1 1 auto; min-width:0; }
+#fitbar button{
+  flex:0 0 auto; font-family:var(--mono); font-size:10px; padding:3px 9px;
+  border-radius:4px; cursor:pointer;
+  color:var(--bg); background:var(--amber); border:1px solid var(--amber);
+}
+#fitbar button:hover{ background:#ffc95a; border-color:#ffc95a; }
+#fitbar button.ghost{
+  color:#ffe6bd; background:transparent; border-color:rgba(255,176,32,.5);
+}
+#fitbar button.ghost:hover{ color:var(--bg); background:var(--amber); }
+@keyframes barFlash{ 0%,100%{ background:#3a2a08; } 50%{ background:#7a5610; } }
+#fitbar.flash{ animation:barFlash .5s ease-in-out 3; }
+/* Same bar, different news: an answer rather than a warning. */
+#fitbar.done{ background:#0c2119; border-bottom-color:var(--green); color:#c9ffe6; }
+#fitbar.done .warnmark{ background:var(--green); }
+#fitbar.done button{ color:var(--bg); background:var(--green); border-color:var(--green); }
+#fitbar.done button.ghost{ color:#c9ffe6; background:transparent; border-color:rgba(0,255,136,.5); }
+@media (prefers-reduced-motion: reduce){ #fitbar.flash{ animation:none; } }
+/* Some people are made unwell by motion; the marker is still amber and still
+   there without it. */
+@media (prefers-reduced-motion: reduce){ th .fitflag.flash{ animation:none; } }
+.selcount{
+  flex:0 0 auto; margin-left:8px; padding:1px 5px; border-radius:3px;
+  font-size:9px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--cyan); border:1px solid rgba(0,229,255,.35); background:rgba(0,229,255,.08);
+}
+/* A group is fetched when it is opened, so the only state worth a badge is
+   the moment in between. */
+.selcount.waiting{
+  color:var(--amber); border-color:rgba(255,176,32,.35); background:rgba(255,176,32,.08);
+}
+.selcount.loading{
+  color:var(--amber); border-color:rgba(255,176,32,.4); background:rgba(255,176,32,.1);
+}
+/* v2.36.4: the caret's place, taken by a spinner while Fusion builds the rows.
+   Drawn with a border rather than a character - this CEF build is old and has
+   already rendered one chosen glyph as nothing at all. */
+.spin{
+  /* sized to the caret's box so the row does not jump when they swap */
+  flex:0 0 20px; width:12px; height:12px; margin:0 6px 0 2px; box-sizing:border-box;
+  border:2px solid rgba(255,176,32,.25); border-top-color:var(--amber);
+  border-radius:50%; display:inline-block; animation:spin .7s linear infinite;
+}
+@keyframes spin{ to{ transform:rotate(360deg); } }
+/* the row is inert while it loads, and looks it */
+tbody tr.grp.busy td.c-qty, tbody tr.grp.busy .txt{ opacity:.55; }
+tbody tr.grp.busy{ cursor:progress; }
+/* v2.36.6: bigger and more obvious, by request. It was a 9px glyph in a 13px
+   box - the single most-clicked control in the table and the smallest target in
+   it. The hit area is deliberately larger than the mark it draws. */
+.caret{
+  flex:0 0 20px; width:20px; height:18px; color:var(--cyan); font-size:14px;
+  cursor:pointer; line-height:18px; text-align:center; margin-right:2px;
+  border-radius:3px; transition:background .12s, color .12s;
+}
+.caret:hover{ color:#fff; background:rgba(0,229,255,.18); }
+.caret:active{ background:rgba(0,229,255,.32); }
+tbody tr.grp .caret{ color:var(--amber); }
+tbody tr.grp .caret:hover{ color:#fff; background:rgba(255,176,32,.22); }
+/* NB: not ".empty" - that class belongs to the empty-state panel, which
+   carries 34px of vertical padding and would inflate every row it touched. */
+.caret.blank{cursor:default; pointer-events:none;}
+tbody tr.grp td.c-name{padding-left:24px;}
+tbody tr.sub td.c-name{padding-left:52px;}
+tbody tr.sub td.c-name{color:var(--text-dim);}
+tbody tr.off td.c-name{color:var(--text-mute);}
+td.c-name{font-family:var(--mono); font-size:11px;}
+td.c-qty{font-family:var(--mono); text-align:right; color:var(--text-dim);}
+/* Qty color encodes the placement state - see the Legend button.
+   These selectors must be at least as specific as td.c-qty above, or that
+   rule's color wins and every cell renders the same gray. */
+td.c-qty.q-single{color:var(--yellow);}
+td.c-qty.q-multi{color:var(--amber);}
+td.c-qty.q-linked{color:var(--violet);}
+td.c-qty.q-local{color:var(--green);}
+td.c-qty.q-unplaced{color:var(--pink);}
+td.c-qty.q-suppressed{color:var(--text-mute); text-decoration:line-through;}
+
+/* Entity Name carries the same placement color as its Qty cell, so the two
+   columns read as one signal instead of two. The color goes on the .txt span
+   rather than the cell: the row-state rules above color td.c-name and outrank
+   a two-class selector, but a declaration on the span itself beats any color
+   the span would otherwise inherit, whatever the cell's specificity. */
+td.c-name .txt.q-single{color:var(--yellow);}
+td.c-name .txt.q-multi{color:var(--amber);}
+td.c-name .txt.q-linked{color:var(--violet);}
+td.c-name .txt.q-local{color:var(--green);}
+td.c-name .txt.q-unplaced{color:var(--pink);}
+td.c-name .txt.q-suppressed{color:var(--text-mute); text-decoration:line-through;}
+/* Sub-entity and hidden rows used to signal themselves by dimming the name's
+   color, which the rules above now overwrite. Opacity carries that cue instead,
+   so a row can be both hidden and legibly color-coded. */
+tbody tr.sub td.c-name .txt{opacity:.8;}
+tbody tr.off td.c-name .txt{opacity:.55;}
+td.c-path{font-family:var(--mono); font-size:10.5px; color:var(--text-dim);}
+td.c-status{font-size:11px; color:var(--text-dim);}
+td.c-sel{text-align:center;}
+td.c-visible{text-align:center;}
+.tag{
+  font-family:var(--mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase;
+  padding:2px 6px; border-radius:3px; border:1px solid;
+}
+.fam-other{color:var(--text-dim);border-color:var(--border);background:rgba(255,255,255,.03);}
+.fam-occ{color:var(--cyan);border-color:rgba(0,229,255,.35);background:rgba(0,229,255,.08);}
+.fam-body{color:var(--green);border-color:rgba(0,255,136,.3);background:rgba(0,255,136,.07);}
+.fam-bodysub{color:#7fdfae;border-color:rgba(0,255,136,.18);background:rgba(0,255,136,.04);}
+.fam-sketch{color:var(--amber);border-color:rgba(255,176,32,.32);background:rgba(255,176,32,.08);}
+.fam-sketchsub{color:#d9a765;border-color:rgba(255,176,32,.18);background:rgba(255,176,32,.04);}
+.fam-cons{color:var(--violet);border-color:rgba(124,92,255,.35);background:rgba(124,92,255,.09);}
+.fam-joint{color:var(--pink);border-color:rgba(255,92,122,.35);background:rgba(255,92,122,.08);}
+
+/* Path text carries the same placement color as its Qty cell, matching the
+   Entity Name. Name, Path and Qty now read as one signal across the row; the
+   Type column keeps its own family colors, which is where type lives. Two
+   classes deep so these beat the plain td.c-path color above - the specificity
+   trap that silently defeated the Qty colors the first time. */
+td.c-path.q-single{color:var(--yellow);}
+td.c-path.q-multi{color:var(--amber);}
+td.c-path.q-linked{color:var(--violet);}
+td.c-path.q-local{color:var(--green);}
+td.c-path.q-unplaced{color:var(--pink);}
+td.c-path.q-suppressed{color:var(--text-mute); text-decoration:line-through;}
+
+/* checkbox */
+input[type=checkbox]{
+  appearance:none;-webkit-appearance:none;
+  width:14px;height:14px;border:1px solid #3a3a45;border-radius:3px;
+  background:var(--panel);cursor:pointer;position:relative;margin:0;vertical-align:middle;
+}
+input[type=checkbox]:checked{background:var(--cyan);border-color:var(--cyan);}
+input[type=checkbox]:checked::after{
+  content:'';position:absolute;left:4px;top:1px;width:4px;height:8px;
+  border:solid #06212a;border-width:0 2px 2px 0;transform:rotate(42deg);
+}
+input[type=checkbox]:indeterminate{background:#3a3a45;border-color:#4a4a58;}
+input[type=checkbox]:indeterminate::after{
+  content:'';position:absolute;left:2px;top:5.5px;width:8px;height:2px;background:var(--text);
+}
+input[type=checkbox]:disabled{opacity:.28;cursor:not-allowed;}
+
+/* ---------- log pane ---------- */
+#loghandle{
+  flex:0 0 5px; cursor:row-resize; background:var(--border);
+  border-top:1px solid #0c0c10;
+}
+#loghandle:hover{background:var(--cyan);}
+#logpane{
+  flex:0 0 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden;
+  background:#101014; border-top:1px solid var(--border);
+}
+.loghead{
+  flex:0 0 auto; display:flex; align-items:center; gap:6px; padding:4px 10px;
+  background:var(--panel-2); border-bottom:1px solid var(--border);
+}
+.loghead .logtitle{
+  font-family:var(--mono); font-size:9.5px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--text-dim);
+}
+.loghead .grow{flex:1 1 auto;}
+.loghead button{padding:2px 7px; font-size:9.5px;}
+.radios.small label{padding:2px 7px; font-size:9.5px; gap:5px;}
+.radios.small input{width:9px; height:9px; border-width:1.5px;}
+#logbody{
+  flex:1 1 auto; min-height:0; overflow:auto; padding:5px 10px;
+  font-family:var(--mono); font-size:10.5px; line-height:1.55;
+  -webkit-user-select:text; user-select:text;
+}
+#logbody .ln{display:flex; gap:8px; white-space:pre-wrap; word-break:break-word;}
+#logbody .t{flex:0 0 auto; color:var(--text-mute);}
+#logbody .m{flex:1 1 auto; color:var(--text-dim);}
+#logbody .ok .m{color:var(--green);}
+#logbody .warn .m{color:var(--amber);}
+#logbody .err .m{color:var(--pink);}
+#logbody .sys .m{color:var(--cyan);}
+#logbody .ui .m{color:var(--text-mute);}   /* interaction trace sits quieter than results */
+
+/* ---------- footer / toast ---------- */
+footer{
+  flex:0 0 auto; padding:6px 12px; background:var(--panel);
+  border-top:1px solid var(--border);
+  font-family:var(--mono); font-size:10px; color:var(--text-mute);
+  display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+}
+footer b{color:var(--text-dim); font-weight:500;}
+footer #bridge{padding:1px 7px;border-radius:3px;border:1px solid;font-size:9px;letter-spacing:.09em;text-transform:uppercase;}
+footer #bridge.live{color:var(--green);border-color:rgba(0,255,136,.35);background:rgba(0,255,136,.07);}
+footer #bridge.preview{color:var(--amber);border-color:rgba(255,176,32,.4);background:rgba(255,176,32,.08);}
+footer #statTimeline.rolled{color:var(--amber);}
+footer .statlabel{
+  color:var(--text-dim); font-size:9px; letter-spacing:.14em; text-transform:uppercase;
+  margin-right:-4px;
+}
+footer .brand{margin-left:auto;}
+footer a{color:var(--cyan); text-decoration:none;}
+#empty{padding:34px 16px; text-align:center; color:var(--text-mute); font-family:var(--mono); font-size:11px; line-height:1.7;}
+#ctxmenu{
+  position:fixed; z-index:40; display:none; min-width:168px; padding:4px;
+  background:var(--panel-2); border:1px solid #4a505c; border-radius:5px;
+  box-shadow:0 6px 18px rgba(0,0,0,.55);
+}
+#ctxmenu button{
+  display:block; width:100%; text-align:left; border:0; background:transparent;
+  padding:6px 10px; border-radius:3px; text-transform:none; letter-spacing:.02em;
+  font-size:11px; color:var(--text);
+}
+#ctxmenu button:hover{background:rgba(0,229,255,.14); color:var(--cyan);}
+#toast{
+  position:fixed; left:50%; bottom:38px; transform:translateX(-50%);
+  max-width:82%; padding:8px 14px; border-radius:5px;
+  background:#241016; border:1px solid rgba(255,92,122,.5); color:#ffd7de;
+  font-family:var(--mono); font-size:10.5px; z-index:20;
+  opacity:0; pointer-events:none; transition:opacity .18s; white-space:pre-wrap;
+}
+#toast.show{opacity:1;}
+#toast.good{background:#0c2119;border-color:rgba(0,255,136,.45);color:#c9ffe6;}
+body.resizing{cursor:col-resize;}
+body.resizing-v{cursor:row-resize;}
+</style>
+</head>
+<body>
+
+
+<div class="tabbar">
+  <button class="tab on" data-tab="list"   title="What the table lists">List</button>
+  <button class="tab"    data-tab="vis"    title="Show and hide geometry">Visibility</button>
+  <button class="tab"    data-tab="cols"   title="Column layout">Columns</button>
+  <button class="tab"    data-tab="tools"  title="Sketch tools and panels">Tools</button>
+  <span class="tabgap"></span>
+  <button class="primary" id="btnRefresh" title="Rescan the active design">Refresh</button>
+</div>
+
+<div class="toolbar tabpanel" id="tab-list">
+  <span class="fieldwrap">
+    <input type="text" id="filter" placeholder="filter name / path / status…">
+    <button id="btnClearFilter" title="Clear the filter" tabindex="-1">×</button>
+  </span>
+  <select id="typeFilter" title="Filter by entity type"><option value="">all types</option></select>
+  <button id="btnSelOnly" title="List only the entities currently selected in Fusion">Selected only <b id="selOnlyN">0</b></button>
+  <button id="btnSub" title="Also list sketch points/curves and body faces, edges and vertices">Sub-entities</button>
+  <button id="btnReveal" title="When something is picked in Fusion, open the rows it is buried under and scroll to it">Reveal selected</button>
+  <button id="btnLoadAll" style="display:none" title="Build every sub-entity row now, so filtering and sorting can see them all">Load all</button>
+</div>
+
+<div class="toolbar tabpanel" id="tab-vis" style="display:none">
+  <span class="radios" id="visMode" title="Set viewport visibility from the Fusion selection">
+    <label class="on"><input type="radio" name="vismode" value="all" checked>All</label>
+    <label><input type="radio" name="vismode" value="selected">Selected</label>
+    <label><input type="radio" name="vismode" value="notSelected">Not selected</label>
+  </span>
+  <div class="sep"></div>
+  <button id="btnShow" title="Show every row currently listed">Show all</button>
+  <button id="btnHide" title="Hide every row currently listed">Hide all</button>
+</div>
+
+<div class="toolbar tabpanel" id="tab-cols" style="display:none">
+  <button id="btnFit" title="Fit every column to its widest entry">Fit columns</button>
+  <button id="btnReset" title="Restore default column widths and sort order">Reset</button>
+</div>
+
+<div class="toolbar tabpanel" id="tab-tools" style="display:none">
+  <button id="btnUnderCon" disabled title="Only available while editing a sketch">Under-constrained</button>
+  <div class="sep"></div>
+  <button id="btnLegend" title="Open the Qty color legend in its own window">Legend</button>
+  <button id="btnLog" title="Show or hide the log pane">Log</button>
+</div>
+
+<div id="fitbar" style="display:none">
+  <span class="warnmark">Cut off</span>
+  <span class="msg"></span>
+  <button id="fitbarGo">Fit them</button>
+  <button id="fitbarX" class="ghost" title="Leave the columns as they are">Dismiss</button>
+</div>
+
+<div class="table-wrap" id="wrap">
+  <table id="tbl">
+    <colgroup id="cg"></colgroup>
+    <thead><tr id="hrow"></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="empty" style="display:none"></div>
+</div>
+
+<div id="loghandle" title="Drag to resize the log"></div>
+<section id="logpane">
+  <div class="loghead">
+    <span class="logtitle">Log</span>
+    <span class="grow"></span>
+    <button id="btnLogCopy" title="Copy the log to the clipboard">Copy</button>
+    <span class="radios small" id="copyMode" title="Copy with colors, or as plain text">
+      <label class="on"><input type="radio" name="copymode" value="color" checked>Color</label>
+      <label><input type="radio" name="copymode" value="plain">Plain</label>
+    </span>
+    <button id="btnLogSave" title="Save the log as an HTML file — renders exactly, unlike a paste">Save</button>
+    <button id="btnLogClear" title="Clear the log">Clear</button>
+    <button id="btnLogHide" title="Hide the log pane">Hide</button>
+  </div>
+  <div id="logbody"></div>
+</section>
+
+<footer>
+  <span class="statlabel">Stats:</span>
+  <span><b id="statTotal">0</b> entities</span>
+  <span id="statShownWrap" title="Rows currently listed. When a filter is on, this is how many of the total it left."><b id="statShown">0</b> listed <span id="capNote"></span></span>
+  <span><b id="statVis">0</b> visible</span>
+  <span title="Entities selected in Fusion (faces and edges included)"><b id="statFusionSel">0</b> selected in Fusion</span>
+  <span id="statSelWrap" title="How many rows in this table those entities map to. Three faces of one body are three selections and one row."><b id="statSel">0</b> rows selected</span>
+  <span id="statTimeline" title="History marker position in the timeline"></span>
+  <span id="statStale" style="display:none" title="An edit changed the model after this table was built. Press Refresh to catch up.">model changed</span>
+  <span id="bridge" class="preview">connecting…</span>
+  <span class="brand">Vibe Coding: Swami · AI: Claude</span>
+</footer>
+
+<div id="ctxmenu">
+  <button data-where="browser">Show in Browser</button>
+  <button data-where="window">Show in Window</button>
+  <button data-where="timeline">Show in Timeline</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+/* ============================ column model ============================ */
+/* What this file is. It is sent to Python on every connect, because the
+   add-in and the page are two files loaded by two different things: Python by
+   Fusion, this page by CEF. CEF can serve a cached copy, in which case the
+   title bar and the startup banner - both written by Python - happily say the
+   new version while the UI on screen is old. Nothing visible distinguished
+   those two situations, and "the fix did nothing" is exactly what it looks
+   like. Now Python compares them and reloads the page if they differ. */
+const UI_VERSION = '2.36.6';
+
+const COLS = [
+  {key:'visible', label:'Show',   kind:'bool', def:58,  min:50,  fit:false},
+  // sorts on selRank (2 = picked directly, 1 = via a face/edge, 0 = not selected)
+  {key:'sel',     label:'Selected',  kind:'num', sortAs:'selRank', def:80, min:62, fit:false},
+  // `tail` is how much of a middle-truncated string is spent on the end of the
+  // text. Names lead with the family and disambiguate at the end (`-A1`, `:2`),
+  // so they split near even. A path's last segment is the entity itself, which
+  // is the whole point of the column, so it keeps more of its tail.
+  {key:'name',    label:'Entity Name',        kind:'text', def:190, min:90,  tail:0.42},
+  {key:'type',    label:'Type',               kind:'text', def:104, min:74},
+  {key:'qty',     label:'Qty',                kind:'num',  def:58,  min:46},
+  {key:'path',    label:'Parent / Child Path',kind:'text', def:300, min:110, tail:0.62},
+  {key:'status',  label:'Instance / Status',  kind:'text', def:250, min:110}
+];
+const COL_PATH = COLS.findIndex(c => c.key === 'path');
+/* There used to be a 32-character ceiling on every column, so that one long
+   entry could not fit-to-widest its column into something enormous and shove
+   the rest of the table off screen. Middle truncation now handles overflow
+   directly - a column that is too narrow shows `Rail-LEFT-EXTRU…6061-T6:1`
+   rather than a useless left fragment - so the ceiling had stopped buying
+   anything and had started costing: a 38-character name could not be shown in
+   full by dragging or by fit-to-widest, and the refusal was silent, which read
+   as a broken drag.
+
+   What is left is a sanity bound. It exists so a stray value cannot produce a
+   column wider than any screen; it is not a layout policy and you should never
+   meet it by hand. Nothing is capped in the range anyone actually drags. */
+const MAX_W = 4000;
+
+function clampW(i, w){
+  return Math.max(COLS[i].min, Math.min(MAX_W, Math.round(w)));
+}
+
+let rows = [];            // full row set from Fusion
+let view = [];            // filtered + sorted
+let selected = new Set(); // row ids selected in Fusion
+let sortKey = null, sortDir = 1;
+let widths = COLS.map(c => c.def);
+/* Defaults, deliberately all-off. The palette opens showing everything, with
+   nothing filtered, nothing hidden and nothing running - so what you see on
+   open is the design, not a previous session's settings. Each of these can be
+   turned on, and the ones worth remembering are remembered. */
+let selectedOnly = false;   // "Selected only" toggle
+let subEntities = false;    // list sketch/body sub-entities too
+let capped = false;         // view was longer than RENDER_CAP
+let expanded = new Set();       // open sub-entity groups, by "<ownerId>|<type>"
+let expandedParents = new Set(); // open parent entity rows, by row id
+/* Reveal: a face picked in the canvas has a row, but that row lives inside a
+   collapsed group inside a collapsed body, several thousand rows down. Finding
+   it by hand defeats the point of the table telling you what is selected. On
+   by default, because a selection you cannot see is the case this exists for;
+   off is one click for anyone who would rather the table hold still. */
+let revealSelected = false;   // off by default, with everything else
+let revealPending = null;    // row id to bring into view after the next render
+/* Which (owner|type) groups have had their rows fetched. Sub-entity rows no
+   longer arrive with the scan - the scan only counts them - so this is the
+   difference between "248 faces exist" and "248 face rows are in the table". */
+const loadedGroups = new Set();
+const loadingGroups = new Set();
+function isLoaded(key){ return loadedGroups.has(key); }
+
+/* A pick can be for a row that has been counted but not built. Python says
+   which group it would be in; with Reveal on, that group is what gets loaded -
+   one body's faces, because you picked one of them.
+
+   This arrives two ways: with a selection push (you picked something) and with
+   a full payload (you switched Sub-entities on while something was picked).
+   Both matter, and only handling the first is why this looked broken. */
+function applyHints(hints){
+  /* Kept even when Reveal is off, because they answer a question the status bar
+     could not: "31 selected in Fusion, 1 row selected" looks broken until you
+     know the other 30 are in groups that have not been built yet. */
+  /* v2.36.6: a hint only means something while its group has no rows. Once the
+     group is loaded the entity has a row of its own and is already inside
+     `selected` - keeping the hint counted it twice, so one picked point read as
+     "1 selected in Fusion / 1 (+1 in 1 unopened group)". */
+  lastHints = (Array.isArray(hints) ? hints : [])
+    .filter(h => !isLoaded(h.ownerId + '|' + h.type));
+  updateCounts();
+  if(!revealSelected || !subEntities || !lastHints.length) return;
+  hints = lastHints;
+  for(const h of hints){
+    const key = h.ownerId + '|' + h.type;
+    if(isLoaded(key) || loadingGroups.has(key)) continue;
+    expandedParents.add(h.ownerId);
+    expanded.add(key);
+    loadGroup(key, h.ownerId, h.type);
+  }
+}
+
+/* Fetch one group's rows. One body, one kind, because someone opened it. */
+function loadGroup(key, ownerId, type){
+  if(loadedGroups.has(key) || loadingGroups.has(key)) return Promise.resolve(false);
+  loadingGroups.add(key);
+  render();                                  // show the row as loading
+  return send('loadSub', {ownerId:ownerId, type:type}).then(res => {
+    loadingGroups.delete(key);
+    if(!res || res.ok === false){
+      toast('Could not load ' + type + '.', false, true);
+      render();
+      return false;
+    }
+    loadedGroups.add(key);
+    const got = (res.rows || []).length;
+    // A load that returns nothing used to be silent, which is how "expanded it
+    // and no rows appeared" became impossible to tell from "never asked".
+    logLine('Loaded ' + got.toLocaleString() + ' ' + type +
+            (got ? '' : ' — Fusion returned none' + (res.why ? ': ' + res.why : '')),
+            got ? 'ok' : 'warn');
+    mergeRows(res.rows || []);
+    if(Array.isArray(res.selected)) selected = new Set(res.selected);
+    if(typeof res.selCount === 'number') fusionSelCount = res.selCount;
+    render();
+    return true;
+  }).catch(e => {
+    loadingGroups.delete(key);
+    logLine('Loading ' + type + ' failed: ' + e, 'err');
+    render();
+    return false;
+  });
+}
+
+/* Rows arriving after the initial scan. Appended rather than replacing, and
+   the derived indexes rebuilt, because everything downstream assumes rows and
+   rowById agree. */
+function mergeRows(incoming){
+  if(!incoming.length) return;
+  cacheParents(incoming);
+  for(const r of incoming) rows.push(r);
+  indexRows();
+  _kidsKey = null;             // the parent -> children map has new members
+  _prefixKey = null;
+}
+let groupIndex = {};        // group key -> {items:[...]}, rebuilt each render
+let inSketch = false;       // Fusion is in sketch edit mode
+let visMode = 'all';        // last applied viewport visibility mode
+// With windowed rendering the DOM cost no longer scales with this, so it is
+// a bound on the plan array rather than on rendering. Kept because a plan
+// for a million rows is still worth refusing.
+const RENDER_CAP = 50000;
+let fusionSelCount = 0;     // raw entity count from Fusion, faces/edges included
+/* The Selection column is a plain readout of Fusion's own selection state, so
+   it is derived from `selected` rather than stored on the row - it can never
+   drift from what Fusion actually has picked. */
+/* Was a pass over every row on every render. Selections are a handful of
+   entities, so only the difference is worth touching - the rest already hold
+   the right value. */
+let _annotated = new Set();
+function annotateSelection(){
+  if(_annotatedStale){
+    _annotatedStale = false;
+    _annotated = new Set();
+    rows.forEach(r => { r.selRank = 0; r.sel = '—'; });
+  }
+  for(const id of _annotated){
+    if(selected.has(id)) continue;
+    const r = rowById.get(id);
+    if(r){ r.selRank = 0; r.sel = '—'; }
+  }
+  for(const id of selected){
+    const r = rowById.get(id);
+    if(r){ r.selRank = 1; r.sel = 'YES'; }
+  }
+  _annotated = new Set(selected);
+}
+/* Sketch-only commands are disabled unless Fusion is actually in a sketch edit
+   session - the button explains why rather than failing when pressed. */
+/* Footer readout, so it is obvious the table is following the timeline. */
+function setTimelineReadout(state){
+  const el = $('statTimeline');
+  if(!el) return;
+  if(state && state.available && state.count > 0){
+    const atEnd = state.position >= state.count;
+    el.textContent = 'timeline ' + state.position + '/' + state.count +
+                     (atEnd ? '' : ' (rolled back)');
+    el.className = atEnd ? '' : 'rolled';
+  }else{
+    el.textContent = '';
+    el.className = '';
+  }
+}
+
+function setSketchState(state){
+  state = state || {};
+  inSketch = !!state.inSketch;
+  const btn = $('btnUnderCon');
+  btn.disabled = !inSketch;
+  btn.title = inSketch
+    ? 'Run sketch.showunderconstrained on "' + (state.sketch || 'the open sketch') + '"'
+    : 'Only available while editing a sketch — double-click a sketch to edit it';
+}
+
+/* An active control, not a readout: ticking it selects that entity in Fusion.
+   Row clicks remain inert - this checkbox is the only selection control.
+
+   kidsSelected marks a parent whose sub-entities include a selection while the
+   parent itself is not selected. That shows as indeterminate - the same hyphen
+   a group row uses for a partly-selected run - so a collapsed parent still
+   tells you something inside it is picked. */
+/* Precedence matters and is stated in the legend: suppressed first (the count
+   is moot), then unplaced, then linked provenance, then the raw count. */
+function qtyClass(r){
+  const f = r.flags || {};
+  if(f.suppressed) return 'q-suppressed';
+  if(f.unplaced || r.qty === 0) return 'q-unplaced';
+  if(f.linked) return 'q-linked';
+  if(f.local) return 'q-local';
+  if(r.qty > 1) return 'q-multi';
+  return 'q-single';
+}
+function qtyTitle(r){
+  const f = r.flags || {};
+  if(f.suppressed) return 'Suppressed placement — the count does not apply';
+  if(f.unplaced || r.qty === 0) return 'This component is not placed anywhere';
+  if(f.linked) return 'Placement of an external (linked) component';
+  if(f.local) return 'Placement of a component defined in this document' +
+                     (r.qty > 1 ? ' — ' + r.qty + ' placements' : '');
+  if(r.qty > 1) return 'Shared by ' + r.qty + ' placements';
+  return 'A single placement';
+}
+
+function rowName(id){
+  const r = rows.find(x => x.id === id);
+  return r ? r.name : ('row ' + id);
+}
+
+function selCellHTML(r, kidsSelected){
+  const mixed = !r.selRank && kidsSelected;
+  const title = mixed
+    ? 'Sub-entities of this row are selected. Tick to also select this entity.'
+    : 'Select this entity in Fusion';
+  return '<input type="checkbox" data-col="sel" data-id="' + r.id + '"' +
+         (r.selRank ? ' checked' : '') + (mixed ? ' data-mixed="1"' : '') +
+         ' title="' + title + '">';
+}
+
+const $ = id => document.getElementById(id);
+const wrap=$('wrap'), tbodyEl=$('tbody'), hrow=$('hrow'), cg=$('cg'), emptyEl=$('empty');
+const tblEl=$('tbl');
+
+/* ============================ Fusion bridge ============================ */
+/* Fusion injects `adsk` into the palette AFTER this script is parsed, so the
+   bridge must be probed at call time - never latched into a const at load. */
+let connected = false;
+
+function bridge(){
+  try{
+    const a = (typeof adsk !== 'undefined' && adsk) ? adsk : (window.adsk || null);
+    return (a && typeof a.fusionSendData === 'function') ? a : null;
+  }catch(e){ return null; }
+}
+function bridgeReady(){ return !!bridge(); }
+
+function setMode(live){
+  connected = !!live;
+  const el = $('bridge');
+  el.textContent = live ? 'live' : 'preview (no Fusion bridge)';
+  el.className = live ? 'live' : 'preview';
+}
+
+function send(action, data){
+  return new Promise(resolve => {
+    const a = bridge();
+    if(!a){ resolve(demoReply(action, data)); return; }
+    if(!connected) setMode(true);
+    try{
+      const r = a.fusionSendData(action, JSON.stringify(data || {}));
+      if(r && typeof r.then === 'function'){
+        r.then(txt => { resolve(parse(txt)); }, err => resolve({ok:false, error:String(err)}));
+      } else {
+        resolve(parse(r));
+      }
+    }catch(e){ resolve({ok:false, error:e.toString()}); }
+  });
+}
+function parse(txt){
+  if(txt === undefined || txt === null || txt === '') return {ok:true};
+  if(typeof txt === 'object') return txt;
+  try{ return JSON.parse(txt); }catch(e){ return {ok:true, raw:String(txt)}; }
+}
+
+/* Messages pushed from Python via palette.sendInfoToHTML(action, json). */
+window.fusionJavaScriptHandler = {
+  handle: function(action, dataStr){
+    try{
+      if(!connected) setMode(true);   // a push proves the bridge is alive
+      const data = dataStr ? JSON.parse(dataStr) : {};
+      if(action === 'data'){ applyData(data); }
+      else if(action === 'selection'){
+        /* Two costs sit behind a pick - Python matching the entity to a row,
+           and this table redrawing - and when it feels slow it matters which.
+           Both are timed, and reported only when they are worth reporting. */
+        const t0 = Date.now();
+        applySelection(data.selected || [], data.selCount, data.sketchState);
+        /* A pick can be for a row that has been counted but not built. Python
+           says which group it would be in; with Reveal on, that group is what
+           gets loaded - one body's faces, because you picked one of them. */
+        applyHints(data.hints);
+        const drawMs = Date.now() - t0;
+        const matchMs = +data.selMs || 0;
+        if(drawMs + matchMs > 250){
+          logLine('Selection took ' + (matchMs + drawMs) + ' ms — ' + matchMs +
+                  ' ms matching in Fusion, ' + drawMs + ' ms redrawing ' +
+                  rows.length.toLocaleString() + ' rows.', 'warn');
+        }
+      }
+      else if(action === 'state'){
+        if(data.sketchState) setSketchState(data.sketchState);
+        if(typeof data.legendOpen === 'boolean'){ legendVisible = data.legendOpen; paintLegendButton(); }
+        if(typeof data.stale === 'boolean') setStale(data.stale);
+      }
+      else if(action === 'log'){ logLine(data.message, data.level || ''); }
+      return JSON.stringify({status:'OK'});
+    }catch(e){
+      toast('UI error: ' + e.toString());
+      return JSON.stringify({status:'FAILED', message:e.toString()});
+    }
+  }
+};
+
+/* ---------------------------- staleness ----------------------------
+   The table is pushed a fresh scan whenever Fusion tells us something we can
+   act on: the selection changed, the document changed, the history marker
+   moved, or a command left the model with a different fingerprint. Most edits
+   land in one of those, so most of the time there is nothing to press.
+
+   What used to be missing was the other half - saying so when a refresh *is*
+   needed. On a design big enough that rescanning after every command would be
+   intrusive, the add-in now stops rescanning and marks itself behind instead.
+   Between the two, "do I need to refresh?" is never a guess: if the button is
+   not lit, you are looking at the current model. */
+let stale = false;
+let scanMs = 0;
+function setStale(on){
+  if(stale === on) return;
+  stale = on;
+  $('btnRefresh').classList.toggle('stale', on);
+  $('statStale').style.display = on ? '' : 'none';
+  $('btnRefresh').title = on
+    ? 'The model changed after this table was built — rescan to catch up'
+    : 'Rescan the active design';
+}
+
+/* ============================ data plumbing ============================ */
+function applyData(payload){
+  if(!payload || payload.ok === false){
+    rows = []; selected = new Set();
+    render(payload && payload.error ? payload.error : 'Could not read the design.');
+    return;
+  }
+  // A timeline move rebuilds the model, so row ids no longer mean what they
+  // did - drop the expansion state rather than reopening arbitrary rows.
+  if(payload.timeline && payload.timeline.available){
+    if(lastMarker !== null && lastMarker !== payload.timeline.position){
+      expanded.clear();
+      expandedParents.clear();
+      revealedFor = null;   // a new marker position is a new set of rows
+    }
+    lastMarker = payload.timeline.position;
+  }
+
+  setStale(false);
+  applyHints(payload.hints || []);
+  for(const k in _flagged) _flagged[k] = false;   // new data, new announcement
+  barDismissed = false;
+  scanMs = (typeof payload.scanMs === 'number') ? payload.scanMs : scanMs;
+  rows = payload.rows || [];
+  cacheParents(rows);
+  indexRows();
+  selected = new Set(payload.selected || []);
+  if(typeof payload.selCount === 'number') fusionSelCount = payload.selCount;
+  if(payload.sketchState) setSketchState(payload.sketchState);
+  setTimelineReadout(payload.timeline);
+  if(typeof payload.legendOpen === 'boolean'){ legendVisible = payload.legendOpen; paintLegendButton(); }
+  if(payload.banner && payload.banner !== lastBanner){
+    lastBanner = payload.banner;
+    logLine(payload.banner, payload.bannerLevel || 'sys');
+    if(payload.bannerLevel === 'err'){
+      logLine('The manifest next to the code is a different version. Fusion reads ' +
+              'that file for its Scripts and Add-Ins panel, so reinstall the whole ' +
+              'folder rather than individual files.', 'err');
+    }
+  }
+  if(typeof payload.subEntities === 'boolean'){
+    subEntities = payload.subEntities;
+    $('btnSub').classList.toggle('on', subEntities);
+  }
+  if(payload.truncated){
+    toast('Stopped at ' + (payload.subCap || 0).toLocaleString() +
+          ' sub-entities — this model has more. Filter by type to narrow it down.');
+  }
+  buildTypeFilter();
+  render();
+}
+
+/* When "Selected only" is on, a selection change changes which rows exist,
+   so re-render rather than just repainting the highlight. */
+function applySelection(ids, count, state){
+  selected = new Set(ids);
+  if(state) setSketchState(state);
+  if(typeof count === 'number') fusionSelCount = count;
+  // Group headers aren't entity rows, so the light repaint below can't refresh
+  // their tri-state box - a full render is required once groups are on screen.
+  if(selectedOnly || subEntities){ render(); return; }
+  if(revealSelection()){ render(); return; }
+  annotateSelection();
+  document.querySelectorAll('tbody tr').forEach(tr => {
+    const r = rows.find(x => x.id === +tr.dataset.id);
+    if(!r) return;
+    tr.classList.toggle('sel', r.selRank > 0);
+    const box = tr.querySelector('td.c-sel input');
+    if(box) box.checked = r.selRank > 0;
+  });
+  updateCounts();
+}
+function updateCounts(){
+  $('statTotal').textContent = rows.length;
+  /* "N listed" next to "M entities" was ambiguous while a filter was on: the
+     two numbers differ and nothing said why. Now it reads "2 of 7 listed", so
+     a filter result is legible without cross-referencing anything. */
+  const filtering = !!($('filter').value.trim() || $('typeFilter').value || selectedOnly);
+  $('statShown').textContent = (filtering && view.length !== rows.length)
+    ? (view.length + ' of ' + rows.length)
+    : view.length;
+  // counted rather than filtered: rows.filter allocated a 44,000-element array
+  // on every render. Not cached, because a visibility toggle changes it and a
+  // stale count is worse than a cheap loop.
+  let vis = 0;
+  for(let i = 0; i < rows.length; i++) if(rows[i].visible) vis++;
+  $('statVis').textContent = vis;
+  /* "31 selected in Fusion / 1 rows selected" is alarming until you know the
+     rest are in groups that have not been loaded. Sub-entity rows arrive on
+     expand, so the gap is expected - but only if it is stated. */
+  /* v2.36.5: the count of hidden *entities*, not of groups. Thirty picked
+     points in one group used to read "+1 in unopened groups", which is a
+     sentence about my data structure rather than about the model. */
+  const hidden = (subEntities && lastHints.length)
+    ? lastHints.reduce((n, h) => n + (h.count || 1), 0) : 0;
+  $('statSel').textContent = hidden
+    ? selected.size + ' (+' + hidden + ' in ' + lastHints.length +
+      ' unopened group' + (lastHints.length === 1 ? '' : 's') + ')'
+    : selected.size;
+  $('statSelWrap').title = hidden
+    ? 'Rows in this table matching the Fusion selection. ' + hidden + ' more group' +
+      (hidden === 1 ? ' holds' : 's hold') + ' selected entities whose rows have not ' +
+      'been built yet — expand them, or turn on Reveal selected.'
+    : 'How many rows in this table those entities map to. Three faces of one body ' +
+      'are three selections and one row.';
+  $('statFusionSel').textContent = fusionSelCount;
+  $('selOnlyN').textContent = selected.size;
+  $('capNote').textContent = capped ? '· showing first ' + RENDER_CAP : '';
+}
+function refresh(){
+  if(!bridgeReady()){
+    // Bridge still not up - give it another moment rather than dropping to demo data.
+    waitForBridge(20, () => send('refresh', {subEntities:subEntities, uiVersion:UI_VERSION}).then(applyData));
+    return;
+  }
+  send('refresh', {subEntities:subEntities, uiVersion:UI_VERSION}).then(applyData);
+}
+
+/* ================= long text: strip the shared part, squeeze the rest =======
+
+   Two separate things push the table wider than the palette:
+
+     1. Every path repeats the same ancestry. In a document called
+        "MIP SCREEN FRAME ASSY (swamitized!)-A1" that prefix is identical on
+        every row, so it costs width and tells you nothing.
+     2. Whatever is left still overflows, and a CSS ellipsis cuts the tail -
+        precisely where CAD names disambiguate (`:2`, `-A1`, `-LEFT`).
+
+   stripPrefix handles the first, middle truncation the second. Both are
+   display-only: tooltips, sorting, filtering, copying and everything sent back
+   to Fusion keep the full strings, so nothing downstream sees a shortened name.
+*/
+const PATH_SEP = ' / ';
+let pathPrefix = '';   // the ancestry currently hidden behind the leading ellipsis
+
+/* Whole leading segments common to every displayed path, never a partial one -
+   a path trimmed mid-segment reads as valid and isn't. The entity's own last
+   segment is excluded from the comparison, so a run of same-named entities in
+   one folder can't strip away the very thing the column exists to show. */
+function commonPathPrefix(paths){
+  if(paths.length < 2) return '';
+  let head = null;
+  for(const p of paths){
+    const segs = String(p == null ? '' : p).split(PATH_SEP);
+    segs.pop();
+    if(!segs.length) return '';
+    if(head === null){ head = segs.slice(); continue; }
+    let n = 0;
+    while(n < head.length && n < segs.length && head[n] === segs[n]) n++;
+    if(!n) return '';
+    head = head.slice(0, n);
+  }
+  return head && head.length ? head.join(PATH_SEP) : '';
+}
+
+/* A path that doesn't start with the prefix is left whole rather than forced -
+   group rows can own a path whose parent got filtered out of the view. */
+/* The last segment of a path is the entity itself, which the Entity Name
+   column already shows in full. Repeating it here cost the widest column its
+   width to say nothing. Path is now the ancestry only. */
+function parentPath(p){
+  const segs = String(p == null ? '' : p).split(PATH_SEP);
+  segs.pop();
+  return segs.join(PATH_SEP);
+}
+
+function shortPath(p){
+  const full = String(p == null ? '' : p);
+  if(!pathPrefix) return full;
+  return full.indexOf(pathPrefix + PATH_SEP) === 0
+    ? '…' + PATH_SEP + full.slice(pathPrefix.length + PATH_SEP.length)
+    : full;
+}
+
+/* parentPath splits and rejoins a string; doing it per row per render meant
+   redoing 12,000 splits every time anything redrew. The ancestry of a row does
+   not change until new rows arrive, so it is computed once, there. */
+/* One pass when rows arrive, so everything after can look a row up by id
+   instead of scanning every time it needs one. */
+let rowById = new Map();
+let _annotatedStale = true;
+function indexRows(){
+  rowById = new Map();
+  for(const r of rows) rowById.set(r.id, r);
+  _annotatedStale = true;      // new row objects carry no selection state
+  _prefixKey = null;           // and the shared prefix must be recomputed
+  _kidsKey = null;             // as must the parent -> children map
+}
+
+function cacheParents(list){
+  for(let i=0; i<list.length; i++) list[i]._parent = parentPath(list[i].path);
+}
+
+/* Recomputing the shared prefix means splitting every path in view - 44,000
+   splits, 44 ms - and the answer only changes when the *membership* of the
+   view changes. A selection change does not change membership (unless
+   "Selected only" is on, which the key covers), so it is memoized against the
+   things that actually decide it. This was most of the cost of picking a face. */
+let _prefixKey = null;
+let _kidsKey = null, _kids = {}, _parentsInView = new Set(), _kidTotals = {};
+function viewKey(){
+  return [rows.length, view.length, $('filter').value, $('typeFilter').value,
+          subEntities ? 1 : 0, selectedOnly ? 1 : 0,
+          selectedOnly ? selected.size : 0].join('\u0001');
+}
+
+function updatePathPrefix(){
+  const key = viewKey();
+  if(key === _prefixKey){ paintPrefixChip(); return; }
+  _prefixKey = key;
+  const before = pathPrefix;
+  pathPrefix = commonPathPrefix(view.map(r => r._parent));
+  if(pathPrefix !== before && pathPrefix){
+    logLine('paths shortened — hiding shared prefix "' + pathPrefix + '"', 'sys');
+  }
+  paintPrefixChip();
+}
+
+function paintPrefixChip(){
+  const th = hrow.children[COL_PATH];
+  if(!th) return;
+  const inner = th.querySelector('.inner');
+  let chip = inner.querySelector('.pfx');
+  if(pathPrefix){
+    if(!chip){
+      chip = document.createElement('span');
+      chip.className = 'pfx';
+      chip.textContent = '…';
+      inner.insertBefore(chip, inner.querySelector('.arrow'));
+    }
+    chip.title = '… stands for "' + pathPrefix + '", shared by every row listed.\n' +
+                 'Hover any path for the full text.';
+  } else if(chip){
+    chip.remove();
+  }
+}
+
+/* --------------------------- middle truncation --------------------------- */
+
+/* Only rows you can actually see get truncated. The rest keep the CSS ellipsis
+   until you scroll to them, which is what keeps dragging a column edge smooth
+   on a 3000-row table - and means a failure here degrades to tail-clipping
+   rather than to blank cells. */
+const TAIL = {name: COLS[2].tail, path: COLS[COL_PATH].tail};
+const SQ_PAD = 6;            // rows of slack above and below the viewport
+const SQ_CACHE_MAX = 4000;
+let sqGen = 0;               // bumped when widths change, to force a re-fit
+let sqPending = false;
+const sqCache = new Map();
+
+function squeezeSoon(){
+  if(sqPending) return;
+  sqPending = true;
+  const run = () => {
+    sqPending = false;
+    try{ squeeze(); paintFitFlags(); }
+    catch(e){ /* display-only: the CSS ellipsis still holds */ }
+  };
+  if(window.requestAnimationFrame) window.requestAnimationFrame(run); else setTimeout(run, 0);
+}
+/* Which columns squeeze() actually had to shorten. Cleared when widths change,
+   because that is when the answer can change; a scroll only adds rows to it. */
+const sqTrunc = {};
+function bumpSqueeze(){
+  sqGen++;
+  for(const k in sqTrunc) delete sqTrunc[k];
+  squeezeSoon();
+}
+
+/* Binary search on how many characters survive. `tailShare` decides how the
+   survivors are split between the two ends. */
+function middleTruncate(text, font, avail, tailShare){
+  const full = String(text == null ? '' : text);
+  if(avail <= 0 || measureText(font, full) <= avail) return full;
+  const key = font + '|' + Math.round(avail) + '|' + tailShare + '|' + full;
+  const hit = sqCache.get(key);
+  if(hit !== undefined) return hit;
+  const ell = '…';
+  let out = ell;
+  if(measureText(font, ell) <= avail){
+    let lo = 1, hi = full.length - 1;
+    while(lo <= hi){
+      const keep = (lo + hi) >> 1;
+      const tail = Math.min(keep, Math.max(1, Math.round(keep * tailShare)));
+      const head = keep - tail;
+      const cand = full.slice(0, head) + ell + full.slice(full.length - tail);
+      if(measureText(font, cand) <= avail){ out = cand; lo = keep + 1; }
+      else hi = keep - 1;
+    }
+  }
+  if(sqCache.size > SQ_CACHE_MAX) sqCache.clear();
+  sqCache.set(key, out);
+  return out;
+}
+
+/* Width comes from the cell, never from the span. A flex item measured after
+   its text shrinks reports the shorter width, so measuring the span would
+   ratchet the text smaller on every pass and never grow it back. */
+function availFor(el){
+  const td = el.parentNode.closest ? el.parentNode.closest('td') : null;
+  if(!td) return 0;
+  const cs = getComputedStyle(td);
+  let avail = td.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+  const sibs = el.parentNode.children;
+  for(let i=0; i<sibs.length; i++) if(sibs[i] !== el) avail -= sibs[i].offsetWidth;
+  return avail - 1;                    // a hair of slack so nothing sits flush
+}
+
+/* Windowed rendering already limits the DOM to what is on screen, so this no
+   longer has to work out which rows those are - everything present is a
+   candidate. */
+function squeeze(){
+  const trs = tbodyEl.children;
+  if(!trs.length) return;
+  const fonts = {};
+  for(let i = 0; i < trs.length; i++){
+    const tr = trs[i];
+    if(tr.classList.contains('spacer')) continue;
+    if(tr._sqGen === sqGen) continue;
+    tr._sqGen = sqGen;
+    const spans = tr.querySelectorAll('.txt[data-col]');
+    for(let k = 0; k < spans.length; k++){
+      const el = spans[k];
+      const col = el.dataset.col || 'name';
+      if(!fonts[col]) fonts[col] = fontOf(el);
+      // Path recovers its untruncated text from the cell title, which is the
+      // full ancestry; everything else carries its own copy.
+      const full = (col === 'path')
+        ? shortPath(el.parentNode.getAttribute('title') || '')
+        : el.dataset.full;
+      const shown = middleTruncate(full, fonts[col], availFor(el), TAIL[col]);
+      if(el.textContent !== shown) el.textContent = shown;
+      if(shown !== full) sqTrunc[col] = true;
+      /* A tooltip only where one is earned. The name cell used to echo the
+         Parent / Child Path, which is its own column - so the hover said
+         nothing new and got in the way. Now it appears only when the text was
+         actually cut, and says only what was cut off. */
+      const td = el.parentNode.parentNode.nodeName === 'TD'
+        ? el.parentNode.parentNode : el.parentNode;
+      if(col === 'name'){
+        if(shown !== full) td.title = full; else td.removeAttribute('title');
+      }
+    }
+  }
+}
+
+/* ============================ rendering ============================ */
+function buildHeader(){
+  hrow.innerHTML = '';
+  cg.innerHTML = '';
+  COLS.forEach((c,i) => {
+    const col = document.createElement('col');
+    col.style.width = widths[i] + 'px';
+    cg.appendChild(col);
+
+    const th = document.createElement('th');
+    th.style.position = 'sticky';
+    th.dataset.idx = i;
+    const inner = document.createElement('div');
+    inner.className = 'inner';
+    inner.innerHTML = '<span class="lbl">' + c.label + '</span><span class="arrow"></span>';
+    th.appendChild(inner);
+
+    const rz = document.createElement('div');
+    rz.className = 'rz';
+    rz.title = 'Drag to resize · double-click to fit the widest entry';
+    rz.addEventListener('mousedown', e => startResize(e, i));
+    rz.addEventListener('dblclick', e => { e.stopPropagation(); fitOne(i, '(double-click)'); });
+    th.appendChild(rz);
+
+    th.addEventListener('click', e => { if(!e.target.classList.contains('rz')) sortBy(c.key); });
+    hrow.appendChild(th);
+  });
+  const padCol = document.createElement('col');
+  padCol.className = 'c-pad';
+  cg.appendChild(padCol);
+  const padTh = document.createElement('th');
+  padTh.className = 'c-pad';
+  padTh.style.position = 'sticky';
+  hrow.appendChild(padTh);
+  paintSortIndicators();
+}
+function paintSortIndicators(){
+  // hrow ends with the spacer th, which has no label to paint
+  COLS.forEach((c,i) => {
+    const th = hrow.children[i];
+    if(!th) return;
+    const on = (sortKey === c.key);
+    th.classList.toggle('sorted', on);
+    th.querySelector('.arrow').textContent = on ? (sortDir > 0 ? '▲' : '▼') : '';
+  });
+}
+/* Writes only. It used to re-clamp every column on every call, which is why
+   dragging one edge could move columns you never touched: the first render
+   after data arrived re-applied the character cap to all seven at once, and
+   whichever ones had been wider than the cap jumped. Clamping now happens in
+   setWidth, on the single column being changed. */
+function applyWidths(){
+  let total = 0;
+  COLS.forEach((c,i) => {
+    const col = cg.children[i];
+    if(!col) return;
+    col.style.width = widths[i] + 'px';
+    total += widths[i];
+  });
+  const pad = cg.children[COLS.length];
+  const slack = Math.max(0, wrap.clientWidth - total);
+  if(pad) pad.style.width = slack + 'px';
+  tblEl.style.width = (total + slack) + 'px';
+  bumpSqueeze();
+}
+
+/* The only way a column width ever changes. It clamps, and it says so when the
+   clamp is what stopped you: a drag that silently refuses to go further is
+   indistinguishable from a broken drag, which is how the character cap kept
+   getting blamed on the resize code. */
+function setWidth(i, w){
+  widths[i] = clampW(i, w);
+  applyWidths();
+}
+
+function computeView(){
+  annotateSelection();
+  const q = $('filter').value.trim().toLowerCase();
+  const t = $('typeFilter').value;
+  view = rows.filter(r => {
+    if(selectedOnly && !selected.has(r.id)) return false;
+    if(t && r.type !== t) return false;
+    if(!q) return true;
+    return (r.name + ' ' + r.path + ' ' + r.status + ' ' + r.type + ' ' + r.sel)
+             .toLowerCase().indexOf(q) !== -1;
+  });
+  if(sortKey){
+    const c = COLS.find(x => x.key === sortKey);
+    const field = c.sortAs || sortKey;      // e.g. Selection sorts on selRank
+    view = view.slice().sort((a,b) => {
+      let x = a[field], y = b[field];
+      if(c.kind === 'num'){ x = +x || 0; y = +y || 0; }
+      else if(c.kind === 'bool'){ x = x ? 1 : 0; y = y ? 1 : 0; }
+      else { x = String(x).toLowerCase(); y = String(y).toLowerCase(); }
+      if(x < y) return -1 * sortDir;
+      if(x > y) return  1 * sortDir;
+      return (a.id - b.id);
+    });
+  }
+}
+
+/* Types are free-form (e.g. "Sketch Fitted Spline"), so color by family
+   rather than by an exact class name per type. */
+function famClass(t){
+  if(t === 'Component') return 'fam-occ';
+  if(t === 'Body' || t === 'Mesh') return 'fam-body';
+  if(t === 'Face' || t === 'Edge' || t === 'Vertex') return 'fam-bodysub';
+  if(t === 'Sketch') return 'fam-sketch';
+  if(t.indexOf('Sketch ') === 0) return 'fam-sketchsub';
+  if(t === 'Plane' || t === 'Axis' || t === 'Point') return 'fam-cons';
+  if(t === 'Joint') return 'fam-joint';
+  return 'fam-other';
+}
+
+/* Same family as the Type tag, but the color-only variant. */
+
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* Both row kinds render this identically - they drifted apart twice before.
+
+   No data-full here, deliberately. The path is the longest string in the row,
+   and emitting it as text, as a title and as a data attribute put three copies
+   of it in the markup - on a 3,000-row table that is most of what the HTML
+   parser is being asked to do. squeeze() recovers the untruncated string from
+   the title it already needs, so the third copy bought nothing. */
+function pathCellHTML(fullPath, colorClass){
+  const parent = (typeof fullPath === 'object' && fullPath) ? fullPath._parent
+                                                            : parentPath(fullPath);
+  const shown  = shortPath(parent);
+  return '<td class="c-path '+colorClass+'" title="'+esc(parent)+'">'
+       + '<span class="txt" data-col="path">'+esc(shown)+'</span></td>';
+}
+
+function rowHTML(r, isChild, kidState, kidsSelected, kidsTotal, alt){
+  // kidState: undefined = not a parent, false = has children but closed,
+  // true = open. Only the caret is clickable - the rest of the row stays inert.
+  let lead = '';
+  if(subEntities && !isChild){
+    lead = (kidState === undefined)
+      ? '<span class="caret blank"></span>'
+      : '<span class="caret" data-parent="' + r.id + '">' + (kidState ? '▾' : '▸') + '</span>';
+  }
+  const cells = [
+    '<td class="c-visible"><input type="checkbox" data-col="vis" data-id="'+r.id+'"'+
+      (r.visible?' checked':'')+(r.canToggle?'':' disabled title="visibility is read-only for this entity"')+'></td>',
+    '<td class="c-sel">'+selCellHTML(r, kidsSelected)+'</td>',
+    '<td class="c-name"><span class="nm">'+lead+
+      '<span class="txt '+qtyClass(r)+'" data-col="name" data-full="'+esc(r.name)+'">'+
+        esc(r.name)+'</span>'+
+      (kidsSelected ? '<span class="selcount">'+kidsSelected+' of '+kidsTotal+' selected</span>' : '')+
+      '</span></td>',
+    '<td class="c-type"><span class="tag '+famClass(r.type)+'"'+
+      (r.type === 'Component'
+        ? ' title="One placement (occurrence) of this component — '+esc(r.status)+'"'
+        : '')+'>'+esc(r.type)+'</span></td>',
+    '<td class="c-qty '+qtyClass(r)+'" title="'+esc(qtyTitle(r))+'">'+esc(r.qty)+'</td>',
+    pathCellHTML(r, qtyClass(r)),
+    '<td class="c-status" title="'+esc(r.status)+'">'+esc(r.status)+'</td>',
+    '<td class="c-pad"></td>'
+  ].join('');
+  return '<tr data-id="'+r.id+'" class="'+(r.selRank?'sel ':'')+(r.visible?'':'off ')+
+         (isChild?'sub ':'')+(alt?'alt':'')+'">'+cells+'</tr>';
+}
+
+/* A group header stands in for a run of sub-entities of one type under one
+   owner - "Face x 248". Ticking its box selects the whole run; the box shows
+   indeterminate when only part of the run is selected. */
+function groupRowHTML(g, alt){
+  const owner = rowById.get(g.parentId) || {};
+  const total = (typeof g.count === 'number') ? g.count : g.items.length;
+  const picked = g.items.filter(r => selected.has(r.id)).length;
+  const open = expanded.has(g.key);
+  const box = '<input type="checkbox" data-col="selgroup" data-key="'+esc(g.key)+'"' +
+              (picked === total ? ' checked' : '') +
+              (picked > 0 && picked < total ? ' data-mixed="1"' : '') + '>';
+  // "3 of 248 selected" - the count the checkbox alone can't tell you.
+  /* Only "loading…" is worth saying. The earlier "not loaded" badge sat on
+     every unopened group and read as a failure, when all it meant was "open me"
+     - which the caret already says. */
+  /* v2.36.4: "loading" used to be the *else* of "something is selected", so a
+     group whose rows were all picked - which is exactly when Reveal has you
+     opening it - showed a selection count and no sign of work in progress. A
+     350-row group then looked identical to one ignoring the click, which is
+     what made people click again. Both facts are true at once; show both. */
+  const busy = loadingGroups.has(g.key);
+  /* v2.36.5: a group whose rows are not built shows nothing about the
+     selection inside it, because `picked` counts rows and there are none yet.
+     The status bar knew ("+1 in unopened group") and the row - where the
+     question is actually asked - did not. */
+  const waiting = (!g.loaded && !busy)
+    ? (lastHints.find(h => h.ownerId + '|' + h.type === g.key) || {}).count || 0 : 0;
+  const chip = (picked ? '<span class="selcount">' + picked + ' of ' + total +
+                         ' selected</span>' : '')
+             + (waiting ? '<span class="selcount waiting">' + waiting +
+                          ' selected — open to see</span>' : '')
+             + (busy ? '<span class="selcount loading">loading ' +
+                       total.toLocaleString() + '…</span>' : '');
+  return '<tr class="grp'+(open?' open':'')+(alt?' alt':'')+(busy?' busy':'')+
+         '" data-key="'+esc(g.key)+'">'
+    + '<td class="c-visible"></td>'
+    + '<td class="c-sel">'+box+'</td>'
+    + '<td class="c-name"><span class="nm">'
+      + (busy ? '<span class="spin" title="Fusion is building these rows"></span>'
+              : '<span class="caret">'+(open?'▾':'▸')+'</span>')
+      + '<span class="txt" data-col="name" data-full="'+esc(g.type+' × '+total)+'">'
+      + esc(g.type)+' × '+total+'</span>'+chip+'</span></td>'
+    + '<td class="c-type"><span class="tag '+famClass(g.type)+'">'+esc(g.type)+'</span></td>'
+    + '<td class="c-qty">'+(picked ? picked+' / '+total : total)+'</td>'
+    + pathCellHTML(owner.path||'', '')
+    + '<td class="c-status" title="'+esc(owner.status||'')+'">'+esc(owner.status||'')+'</td>'
+    + '<td class="c-pad"></td>'
+    + '</tr>';
+}
+
+/* Two levels of nesting: a parent entity row owns type groups, and each group
+   owns its sub-entities. Both start closed, so switching sub-entities on adds
+   carets rather than thousands of rows.
+
+   A group whose parent has been filtered out of the view is emitted at top
+   level instead - otherwise filtering to "Face" would hide everything. */
+/* Open whatever a selected sub-entity is buried under, and note the deepest
+   one so render can scroll to it. Returns whether anything actually changed -
+   expanding when nothing was closed would re-render for no reason. */
+let revealedFor = null;   // the selection Reveal has already opened rows for
+
+function revealSelection(){
+  if(!revealSelected || !subEntities || !selected.size){ revealedFor = null; return false; }
+  /* v2.36.3: this runs inside render(), so it used to re-open a group on every
+     single render - including the render caused by the click that had just
+     closed it. The caret and the group row both looked dead, and every click
+     logged "collapse" because the group was always open again by the time the
+     next one arrived.
+
+     Reveal's job is to open rows when the *selection* changes, not to hold
+     them open forever. Once it has acted on a selection it stays out of the
+     way, so collapsing works and stays worked until you pick something else. */
+  // a fingerprint rather than a joined list: this is computed on every render
+  // and the selection can run to thousands of ids
+  let sum = 0, mn = Infinity, mx = -Infinity;
+  for(const id of selected){
+    sum = (sum + id) % 2147483647;
+    if(id < mn) mn = id;
+    if(id > mx) mx = id;
+  }
+  const sig = selected.size + ':' + mn + ':' + mx + ':' + sum;
+  if(sig === revealedFor) return false;
+  revealedFor = sig;
+  let changed = false, target = null;
+  for(const id of selected){
+    const r = rowById.get(id);
+    if(!r) continue;
+    if(r.parentId === null || r.parentId === undefined) continue;
+    if(!expandedParents.has(r.parentId)){ expandedParents.add(r.parentId); changed = true; }
+    const key = r.parentId + '|' + (r.group || r.type);
+    if(!expanded.has(key)){ expanded.add(key); changed = true; }
+    if(target === null) target = r.id;
+  }
+  if(target !== null) revealPending = target;
+  return changed;
+}
+
+/* Put a revealed row on screen. With windowed rendering the row may not be in
+   the DOM at all, so the scroll position is computed from its place in the
+   plan rather than from an element. */
+function scrollToPending(){
+  if(revealPending === null) return;
+  const id = revealPending;
+  revealPending = null;
+  let idx = -1;
+  for(let i = 0; i < plan.length; i++){
+    if(plan[i].r && plan[i].r.id === id){ idx = i; break; }
+  }
+  if(idx < 0) return;
+  const viewport = wrap.clientHeight || 480;
+  const top = idx * rowH;
+  // only move if it is not already comfortably on screen
+  if(top < wrap.scrollTop + rowH || top > wrap.scrollTop + viewport - rowH * 2){
+    wrap.scrollTop = Math.max(0, top - viewport / 3);
+    paintWindow(true);
+  }
+}
+
+function buildDisplay(){
+  groupIndex = {};
+  if(!subEntities) return view.map(r => ({g:null, r:r}));
+
+  /* The parent -> type -> children map is a pass over every row with an array
+     push each time, and it depends only on which rows are listed. A selection
+     change does not change it, so it is cached against the same key the path
+     prefix uses. What a selection *does* change is the "3 of 248 selected"
+     counts, and those are computed from the selection itself - a handful of
+     ids - rather than by re-filtering every child list. */
+  /* Groups are declared by the owner as {type, count} - the scan counts them
+     without walking them - and their rows arrive only when a group is opened.
+     So a group has a *count* (always known) and *items* (known once loaded),
+     and those two are not the same number until it has been loaded. */
+  if(_kidsKey !== viewKey()){
+    _kidsKey = viewKey();
+    _kids = {};
+    _parentsInView = new Set();
+    for(const r of view){
+      if(r.parentId === null || r.parentId === undefined){ _parentsInView.add(r.id); continue; }
+      const byType = _kids[r.parentId] || (_kids[r.parentId] = {});
+      // grouped by the group the owner declared, not by the row's own type -
+      // one "Sketch Curve" group holds Lines, Arcs and Splines
+      const gk = r.group || r.type;
+      (byType[gk] || (byType[gk] = [])).push(r);
+    }
+    _kidTotals = {};
+    for(const pid in _kids){
+      let n = 0;
+      for(const type of Object.keys(_kids[pid])) n += _kids[pid][type].length;
+      _kidTotals[pid] = n;
+    }
+  }
+  const kids = _kids, parentsInView = _parentsInView;
+
+  // selected children per parent, straight from the selection
+  const selByParent = {};
+  if(selected.size){
+    for(const id of selected){
+      const r = rowById.get(id);
+      if(!r || r.parentId === null || r.parentId === undefined) continue;
+      selByParent[r.parentId] = (selByParent[r.parentId] || 0) + 1;
+    }
+  }
+
+  const out = [];
+  const done = new Set();
+
+  function emitGroups(parentId){
+    const byType = kids[parentId];
+    if(!byType) return;
+    for(const type of Object.keys(byType)){
+      const key = parentId + '|' + type;
+      if(done.has(key)) continue;
+      done.add(key);
+      const g = {key:key, type:type, parentId:parentId, items:byType[type],
+                 count:byType[type].length, loaded:true};
+      groupIndex[key] = g;
+      out.push({g:g, r:null});
+    }
+  }
+
+  /* A group the owner has declared but which has not been loaded yet: it
+     knows its type and how many rows it will have, and nothing else. */
+  function emitDeclared(r){
+    for(const dec of r.subGroups){
+      const key = r.id + '|' + dec.type;
+      if(done.has(key)) continue;
+      done.add(key);
+      const g = {key:key, type:dec.type, parentId:r.id,
+                 items:(kids[r.id] && kids[r.id][dec.type]) || [],
+                 count:dec.count, loaded:isLoaded(key)};
+      groupIndex[key] = g;
+      out.push({g:g, r:null});
+    }
+  }
+
+  for(const r of view){
+    if(r.parentId === null || r.parentId === undefined){
+      const declared = r.subGroups && r.subGroups.length;
+      const has = declared || !!kids[r.id];
+      let total = 0;
+      if(declared) for(const d of r.subGroups) total += d.count;
+      else total = _kidTotals[r.id] || 0;
+      out.push({g:null, r:r,
+                kidState: has ? expandedParents.has(r.id) : undefined,
+                kidsSelected: has ? (selByParent[r.id] || 0) : 0,
+                kidsTotal: has ? total : 0});
+      if(has && expandedParents.has(r.id)){
+        if(declared) emitDeclared(r); else emitGroups(r.id);
+      }
+    } else if(!parentsInView.has(r.parentId)){
+      emitGroups(r.parentId);
+    }
+  }
+  return out;
+}
+/* ------------------------- windowed rendering -------------------------
+
+   The table used to build DOM for every row it was willing to show - up to
+   RENDER_CAP of them. Switching Sub-entities on turns a 400-row table into a
+   12,000-row one, and the cost of that switch was almost entirely the browser
+   constructing 3,000 rows of elements that nobody could see: about forty fit
+   on screen.
+
+   So the row list is now planned but not rendered. Only the slice around the
+   viewport becomes DOM, with two spacer rows standing in for everything above
+   and below so the scrollbar keeps the length it should have. Scrolling
+   repaints the slice, which is a few dozen rows rather than a few thousand.
+
+   Two things follow from this that are easy to get wrong, and are handled
+   above: striping comes from an `alt` class computed from the absolute row
+   index, because nth-child would stripe by DOM position and the stripes would
+   crawl as you scroll; and anything that samples "the first row of kind X" has
+   to exclude the spacers. */
+const WIN_PAD = 8;             // rows rendered beyond each edge of the viewport
+let plan = [];                 // one entry per row that would be shown
+let winFirst = -1, winLast = -1;
+let rowH = 22;                 // measured from the first real row after paint
+
+function buildPlan(){
+  const display = buildDisplay();
+  plan = [];
+  capped = false;
+  for(const entry of display){
+    if(plan.length >= RENDER_CAP){ capped = true; break; }
+    if(entry.g){
+      plan.push({g: entry.g});
+      if(expanded.has(entry.g.key)){
+        for(const child of entry.g.items){
+          if(plan.length >= RENDER_CAP){ capped = true; break; }
+          plan.push({r: child, child: true});
+        }
+      }
+    } else {
+      plan.push({r: entry.r, child: !!entry.child, kidState: entry.kidState,
+                 kidsSelected: entry.kidsSelected, kidsTotal: entry.kidsTotal});
+    }
+  }
+}
+
+function spacerRow(px){
+  return '<tr class="spacer" style="height:' + px + 'px"><td colspan="' +
+         (COLS.length + 1) + '"></td></tr>';
+}
+
+function paintWindow(force){
+  const total = plan.length;
+  if(!total){
+    tbodyEl.innerHTML = '';
+    winFirst = winLast = -1;
+    return;
+  }
+  // clientHeight is 0 before the palette has been laid out; guessing a screenful
+  // is better than rendering a single row and leaving the rest blank
+  const viewport = wrap.clientHeight || 480;
+  const first = Math.max(0, Math.floor(wrap.scrollTop / rowH) - WIN_PAD);
+  const last  = Math.min(total - 1,
+                  Math.ceil((wrap.scrollTop + viewport) / rowH) + WIN_PAD);
+  if(!force && first === winFirst && last === winLast) return;
+  winFirst = first; winLast = last;
+
+  const parts = [];
+  if(first > 0) parts.push(spacerRow(first * rowH));
+  for(let i = first; i <= last; i++){
+    const p = plan[i];
+    parts.push(p.g ? groupRowHTML(p.g, i % 2)
+                   : rowHTML(p.r, p.child, p.kidState, p.kidsSelected, p.kidsTotal, i % 2));
+  }
+  const below = total - 1 - last;
+  if(below > 0) parts.push(spacerRow(below * rowH));
+  tbodyEl.innerHTML = parts.join('');
+  // indeterminate is a property, not an attribute - set it after the write
+  tbodyEl.querySelectorAll('input[data-mixed]').forEach(b => { b.indeterminate = true; });
+  measureRowH();
+  bumpSqueeze();
+}
+
+/* Row height is uniform, so one measurement drives every spacer. If it turns
+   out different from the assumption the window is repainted once with the real
+   figure rather than left subtly misaligned. */
+function measureRowH(){
+  const tr = tbodyEl.querySelector('tr:not(.spacer)');
+  if(!tr) return;
+  const h = tr.offsetHeight;
+  if(h > 6 && Math.abs(h - rowH) > 0.5){
+    rowH = h;
+    winFirst = winLast = -1;
+    paintWindow(true);
+  }
+}
+
+/* ---------------------- "does not fit" markers ----------------------
+
+   Nothing here resizes anything. It measures which columns are currently
+   hiding text and puts a FIT marker in those headers; clicking it fits that
+   one column. Two reasons it is a flag rather than an automatic fit:
+
+   - a column that widens itself shifts every column after it, under a cursor
+     that was aimed at something else;
+   - "widest entry" is a property of the data, not of your intent. On a table
+     where one path is four times longer than the rest, auto-fitting is the
+     wrong answer often enough that it should be asked for.
+
+   Detection is uniform across columns because the two ways text gets hidden
+   are not: Entity Name and Path are middle-truncated by squeeze(), while Qty,
+   Type and Status simply overflow and get a CSS ellipsis. Comparing scrollWidth
+   against clientWidth catches both, and needs to know about neither. */
+const _flagged = {};      // column index -> announced for this data set
+function paintFitFlags(){
+  const trs = tbodyEl.children;
+  if(!trs.length) return;
+  /* The same measurement Fit uses, so the marker and Fit can never disagree
+     about whether a column is cut off. */
+  const over = {};
+  COLS.forEach((c, i) => { if(columnShortfall(i) > 0) over[i] = true; });
+  const fresh = [];
+  COLS.forEach((col, i) => {
+    const th = hrow.children[i];
+    if(!th) return;
+    const inner = th.querySelector('.inner');
+    if(!inner) return;
+    let flag = inner.querySelector('.fitflag');
+    if(over[i]){
+      if(!flag){
+        flag = document.createElement('span');
+        flag.className = 'fitflag';
+        flag.textContent = 'FIT';
+        flag.title = 'Text in this column is cut off. Click to widen it to its ' +
+                     'widest entry — nothing resizes on its own.';
+        flag.addEventListener('click', e => {
+          e.stopPropagation();          // the header itself sorts
+          fitOne(i, '(FIT marker)');
+        });
+        inner.appendChild(flag);
+      }
+      if(!_flagged[i]){
+        _flagged[i] = true;
+        fresh.push(col.label);
+        // restart the animation even if the class is already there
+        flag.classList.remove('flash');
+        void flag.offsetWidth;
+        flag.classList.add('flash');
+      }
+    } else if(flag){
+      flag.remove();
+      _flagged[i] = false;
+    }
+  });
+
+  /* The log is a record, not a notification - it scrolls, and it can be hidden
+     entirely. Anything the user needs to *notice* has to go through the toast,
+     which is where every other "you should know this" in the palette goes.
+     One toast for however many columns, because three toasts in a row is not
+     three times as noticeable. */
+  if(fresh.length && !barDismissed){
+    const what = fresh.length === 1
+      ? '"' + fresh[0] + '" is'
+      : fresh.map(f => '"' + f + '"').join(', ') + ' are';
+    showFitBar(what + ' too narrow to show everything.');
+    logLine(what + ' too narrow for the content — use FIT in the header, the ' +
+            'button above the table, or double-click the divider.', 'warn');
+  }
+  // nothing hidden any more: the notice has nothing left to say
+  if(!Object.keys(over).length) hideFitBar();
+}
+
+/* ------------------------------ the notice ------------------------------
+   Persistent by design. It sits above the columns it is describing, stays
+   until it is acted on or dismissed, and offers the action it is asking for.
+   Dismissing is remembered until the next scan, so it cannot be re-raised by
+   a scroll. */
+let barDismissed = false;
+function showFitBar(msg, kind){
+  const bar = $('fitbar');
+  // the same bar carries "these columns are cut off" and "here is what Fit did"
+  bar.querySelector('.warnmark').textContent = (kind === 'done') ? 'Fit' : 'Cut off';
+  bar.classList.toggle('done', kind === 'done');
+  $('fitbarGo').style.display = (kind === 'done') ? 'none' : '';
+  bar.querySelector('.msg').textContent = msg;
+  bar.style.display = 'flex';
+  bar.classList.remove('flash');
+  void bar.offsetWidth;
+  bar.classList.add('flash');
+}
+function hideFitBar(){
+  const bar = $('fitbar');
+  if(bar.style.display !== 'none'){
+    bar.style.display = 'none';
+    bar.classList.remove('flash');
+  }
+}
+
+let scrollPending = false;
+function onTableScroll(){
+  if(scrollPending) return;
+  scrollPending = true;
+  const run = () => { scrollPending = false; paintWindow(false); squeezeSoon(); };
+  if(window.requestAnimationFrame) window.requestAnimationFrame(run); else setTimeout(run, 0);
+}
+
+function render(message){
+  computeView();
+  revealSelection();           // may open rows, so it must precede buildPlan
+  updatePathPrefix();          // must precede rowHTML - it reads pathPrefix
+  buildPlan();
+  winFirst = winLast = -1;     // the plan changed; repaint whatever is on screen
+  paintWindow(true);
+
+  const nothing = view.length === 0;
+  emptyEl.style.display = nothing ? 'block' : 'none';
+  $('tbl').style.display = nothing ? 'none' : '';
+  if(nothing){
+    emptyEl.textContent = message || (
+      selectedOnly && !selected.size
+        ? 'Nothing selected.\nPick something in the canvas or browser —\nor switch "Selected only" back off.'
+          : rows.length
+          ? 'No entities match the current filter.'
+          : 'Nothing to inspect.\nOpen a design, then hit Refresh.');
+  }
+  updateCounts();
+  applyWidths();
+  scrollToPending();
+  const pending = subEntities ? pendingSubCount() : 0;
+  const btn = $('btnLoadAll');
+  btn.style.display = pending ? '' : 'none';
+  if(pending) btn.textContent = 'Load all (' + pending.toLocaleString() + ')';
+}
+
+function buildTypeFilter(){
+  const sel = $('typeFilter');
+  const cur = sel.value;
+  const types = [...new Set(rows.map(r => r.type))].sort();
+  sel.innerHTML = '<option value="">all types</option>' +
+    types.map(t => '<option value="'+esc(t)+'">'+esc(t)+'</option>').join('');
+  if(types.indexOf(cur) !== -1) sel.value = cur;
+}
+
+/* ============================ sorting ============================ */
+function sortBy(key){
+  if(sortKey === key){
+    if(sortDir === 1){ sortDir = -1; }
+    else { sortKey = null; sortDir = 1; }   // third click restores natural order
+  } else { sortKey = key; sortDir = 1; }
+  paintSortIndicators();
+  render();
+}
+
+/* ============================ column resizing ============================ */
+let rz = null;
+function startResize(e, i){
+  e.preventDefault(); e.stopPropagation();
+  rz = {i:i, x:e.clientX, w:widths[i]};
+  document.body.classList.add('resizing');
+  window.addEventListener('mousemove', onResize);
+  window.addEventListener('mouseup', endResize);
+}
+function onResize(e){
+  if(!rz) return;
+  setWidth(rz.i, rz.w + (e.clientX - rz.x));
+}
+function endResize(){
+  rz = null;
+  document.body.classList.remove('resizing');
+  window.removeEventListener('mousemove', onResize);
+  window.removeEventListener('mouseup', endResize);
+  saveWidths();
+}
+
+/* fit-to-widest: measure the real text with the real fonts, take the max.
+   Canvas is the fast path; an offscreen span is the fallback if 2d context
+   is unavailable, so "Fit columns" can never throw. */
+let ctx = null;
+try{ ctx = document.createElement('canvas').getContext('2d'); }catch(e){ ctx = null; }
+let mspan = null;
+
+function fontOf(el){
+  const s = getComputedStyle(el);
+  return (s.fontStyle||'normal')+' '+(s.fontWeight||'400')+' '+s.fontSize+' '+s.fontFamily;
+}
+function measureText(font, text){
+  if(ctx){ ctx.font = font; return ctx.measureText(text).width; }
+  if(!mspan){
+    mspan = document.createElement('span');
+    mspan.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;white-space:pre;';
+    document.body.appendChild(mspan);
+  }
+  mspan.style.font = font;
+  mspan.textContent = text;
+  return mspan.offsetWidth || (String(text).length * 6.5);
+}
+/* What a cell spends on things that are not the text: padding, and in the name
+   column the caret, the indent of a nested row and any "3 of 248" chip. Fit
+   ignored all of it, so fitting the Entity Name column left every name still
+   truncated by roughly a caret and an indent - which read as "fit doesn't
+   work". Row kinds differ, so take the worst of the three on show. */
+function cellOverhead(i){
+  const kinds = ['tbody tr:not(.sub):not(.grp):not(.spacer)',
+                 'tbody tr.sub', 'tbody tr.grp'];
+  let worst = 0, sawOne = false;
+  for(const sel of kinds){
+    const tr = tbodyEl.querySelector(sel);
+    if(!tr) continue;
+    const td = tr.children[i];
+    if(!td) continue;
+    const txt = td.querySelector('.txt');
+    let over;
+    if(txt){
+      over = td.clientWidth - availFor(txt);
+    } else {
+      const cs = getComputedStyle(td);
+      over = parseFloat(cs.paddingLeft || 0) + parseFloat(cs.paddingRight || 0);
+    }
+    if(isFinite(over)){ sawOne = true; if(over > worst) worst = over; }
+  }
+  return sawOne ? worst : 22;
+}
+
+/* The text a cell would show if it had room - not what it is showing, which is
+   already truncated, and not the raw field, which for Path includes the entity
+   segment the column no longer prints. */
+function fitTextFor(c, r){
+  if(c.key === 'path') return shortPath(parentPath(r.path));
+  const v = r[c.key];
+  return String(v == null ? '' : v);
+}
+
+/* Canvas measureText knows about the font and nothing else. It does not apply
+   `text-transform`, and it does not add `letter-spacing` - and the Type column
+   is a pill with both (`uppercase`, `.08em`), as is every column header. So fit
+   measured a string nobody was rendering, came back short, and the column it
+   had just "fitted" stayed truncated. This reads the style and corrects for it. */
+function textMetrics(el){
+  const cs = getComputedStyle(el);
+  const spacing = parseFloat(cs.letterSpacing);
+  return {
+    font: (cs.fontStyle||'normal')+' '+(cs.fontWeight||'400')+' '+cs.fontSize+' '+cs.fontFamily,
+    transform: cs.textTransform,
+    spacing: isFinite(spacing) ? spacing : 0,
+    // the element's own horizontal box, which for a pill is padding + border
+    box: (parseFloat(cs.paddingLeft)||0) + (parseFloat(cs.paddingRight)||0) +
+         (parseFloat(cs.borderLeftWidth)||0) + (parseFloat(cs.borderRightWidth)||0)
+  };
+}
+
+function renderedWidth(text, m){
+  let t = String(text == null ? '' : text);
+  if(m.transform === 'uppercase') t = t.toUpperCase();
+  else if(m.transform === 'lowercase') t = t.toLowerCase();
+  else if(m.transform === 'capitalize') t = t.replace(/\b\w/g, c => c.toUpperCase());
+  return measureText(m.font, t) + m.spacing * t.length;
+}
+
+function fitColumn(i){
+  const c = COLS[i];
+  if(c.fit === false){ setWidth(i, c.def); saveWidths(); return; }
+
+  const th = hrow.children[i];
+  const hm = textMetrics(th.querySelector('.lbl') || th);
+  let widest = renderedWidth(c.label, hm) + 26;   // header text, arrow, FIT marker
+
+  const sampleCell = tbodyEl.querySelector('tr:not(.spacer) td:nth-child('+(i+1)+')');
+  if(sampleCell){
+    const src = sampleCell.querySelector('.tag') || sampleCell.querySelector('.txt') || sampleCell;
+    const m = textMetrics(src);
+    const inner = (src === sampleCell) ? 0 : m.box;   // the pill's own padding and border
+    const over = cellOverhead(i);
+    for(let k=0; k<view.length; k++){
+      const w = renderedWidth(fitTextFor(c, view[k]), m) + inner + over + 2;
+      if(w > widest) widest = w;
+    }
+  }
+  setWidth(i, Math.ceil(widest));
+
+  /* Then widen until nothing in the column is cut off, checking with the same
+     function that lights the marker. Fit's job is defined as "the marker goes
+     out", so the two cannot end up disagreeing - which is what produced
+     "fitted 257->329px" followed by "still too narrow" followed by "already
+     fits". A bounded loop, because a column whose minimum exceeds the pane
+     could otherwise grow forever. */
+  for(let pass = 0; pass < 8; pass++){
+    const short = columnShortfall(i);
+    if(short <= 0) break;
+    const before = widths[i];
+    setWidth(i, before + short + 2);
+    if(widths[i] === before) break;      // clamped: growing further is futile
+  }
+  saveWidths();
+  return widths[i];
+}
+
+/* Fitting one column - the FIT marker in a header, or a double-click on a
+   divider - said nothing either. Two clicks with no change and no message is
+   indistinguishable from a dead button. */
+function fitOne(i, why){
+  const before = widths[i];
+  const after = fitColumn(i);
+  const label = COLS[i].label;
+  // whether it worked is a question about the column, not about the arithmetic
+  const stillCut = columnShortfall(i) > 0;
+  const detail = (before === after ? 'already ' + after + 'px' : before + '\u2192' + after + 'px');
+  logLine('Fit: "' + label + '" ' + (why || '') + ' — ' + detail +
+          (stillCut ? ' — still cut off' : ''), stillCut ? 'warn' : 'ok');
+  showFitBar(
+    stillCut
+      ? '"' + label + '" is at ' + after + 'px and still cannot show everything — ' +
+        'the pane is not wide enough for it.'
+      : (before === after
+          ? '"' + label + '" already fits its content — nothing to change.'
+          : 'Fitted "' + label + '" — ' + before + '\u2192' + after + 'px.'),
+    stillCut ? undefined : 'done');
+}
+
+/* The worst overflow among the cells currently rendered in one column, in
+   pixels. Zero when everything fits. */
+/* How much wider one column needs to be, measured against what is on screen.
+
+   `scrollWidth > clientWidth` alone is not enough. The Entity Name cell is a
+   flex row - caret, text, and sometimes a "1 of 4 selected" chip - and a flex
+   item shrinks rather than overflowing, so a truncated name reports no overflow
+   at all. That is why fitting the column twice changed nothing while the FIT
+   marker stayed lit: the row that did not fit was a *group* row, whose label
+   and chip are not in `view` and so were never measured.
+
+   So for the columns that carry a .txt span, the question asked is squeeze's
+   question - does the full string fit the space the span actually has - which
+   covers entity rows, group rows and their chips alike. */
+/* One question, one answer, used by both the FIT marker and by Fit itself.
+
+   They used to answer it separately - the marker from squeeze's record of what
+   it had shortened, Fit from its own per-row arithmetic - and they disagreed:
+   the log would read "Fit: Entity Name 257->329px", then "Entity Name is too
+   narrow", then "Fit: already fits". Two measurements, one column, opposite
+   conclusions, and a marker that would not go out. Whatever the discrepancy
+   was, the fix is not to find it; it is to stop having two of them.
+
+   Returns how much wider the column needs to be. Zero means nothing in it is
+   cut off, which is exactly when the marker should not be lit. */
+function columnShortfall(i){
+  let worst = 0;
+  const trs = tbodyEl.children;
+  const fonts = {};
+  for(let r = 0; r < trs.length; r++){
+    if(trs[r].classList.contains('spacer')) continue;
+    const td = trs[r].children[i];
+    if(!td) continue;
+    // Before the table has been laid out every width is zero, and "the text is
+    // wider than nothing" is true of all text. Nothing can be judged yet.
+    if(!td.clientWidth) continue;
+
+    const span = td.querySelector('.txt[data-col]');
+    if(span){
+      const col = span.dataset.col || 'name';
+      if(!fonts[col]) fonts[col] = textMetrics(span);
+      const full = (col === 'path')
+        ? shortPath(span.parentNode.getAttribute('title') || '')
+        : (span.dataset.full || span.textContent);
+      const need = renderedWidth(full, fonts[col]) - availFor(span);
+      if(need > worst) worst = need;
+      continue;
+    }
+
+    const el = td.querySelector('.tag') || td;
+    const gap = el.scrollWidth - el.clientWidth;
+    if(gap > worst) worst = gap;
+    if(el !== td){
+      const cs = getComputedStyle(td);
+      const room = td.clientWidth -
+        ((parseFloat(cs.paddingLeft)||0) + (parseFloat(cs.paddingRight)||0));
+      const need = el.offsetWidth - room;
+      if(need > worst) worst = need;
+    }
+  }
+  return Math.ceil(worst);
+}
+/* Fit had no visible outcome. If it computed widths close to the current ones
+   the table did not move, and with the log hidden by default there was nothing
+   at all to distinguish "did nothing" from "did nothing it needed to" - which
+   reads as broken either way. So it reports: what changed, or that nothing had
+   to. Errors are caught per column, because one column that cannot be measured
+   should not abandon the other six silently. */
+function fitAll(){
+  const before = widths.slice();
+  const trouble = [];
+  COLS.forEach((c,i) => {
+    try{ fitColumn(i); }
+    catch(e){ trouble.push(c.label); logLine('Fit failed on "' + c.label + '": ' + e, 'err'); }
+  });
+  const moved = COLS.map((c,i) => ({label:c.label, from:before[i], to:widths[i]}))
+                    .filter(x => x.from !== x.to);
+  const detail = moved.map(x => x.label + ' ' + x.from + '\u2192' + x.to + 'px').join(', ');
+  if(moved.length){
+    logLine('Fit columns: ' + detail, 'ok');
+    showFitBar('Fitted ' + moved.length + ' column' + (moved.length === 1 ? '' : 's') +
+               ' \u2014 ' + detail + '.', 'done');
+  } else if(trouble.length){
+    showFitBar('Could not measure: ' + trouble.join(', ') + '.', 'done');
+  } else {
+    logLine('Fit columns: every column already fits its content.', 'ok');
+    showFitBar('Every column already fits its content \u2014 nothing to change.', 'done');
+  }
+}
+function resetAll(){
+  widths = COLS.map((c,i) => clampW(i, c.def));
+  sortKey = null; sortDir = 1;
+  paintSortIndicators(); applyWidths(); render(); saveWidths();
+}
+
+/* remember widths between sessions where storage is available */
+function saveWidths(){
+  try{ window.localStorage.setItem('si.widths', JSON.stringify(widths)); }catch(e){}
+}
+/* Not restored, for the same reason the tab and the log are not: Reveal is
+   part of the opening state, and the opening state is "everything off". */
+function loadReveal(){
+  $('btnReveal').classList.toggle('on', revealSelected);
+}
+function loadWidths(){
+  try{
+    const raw = window.localStorage.getItem('si.widths');
+    if(raw){
+      const w = JSON.parse(raw);
+      if(Array.isArray(w) && w.length === COLS.length) widths = w.map((v,i) => clampW(i, +v || COLS[i].def));
+    }
+  }catch(e){}
+}
+
+/* ============================ visibility ============================ */
+function setVisibility(ids, value){
+  if(!ids.length) return;
+  ids.forEach(id => { const r = rows.find(x => x.id === id); if(r) r.visible = value; });
+  render();
+  send('setVisibility', {ids:ids, visible:value, withParents:true}).then(res => {
+    if(!res || res.ok === false){
+      toast((res && res.error) || 'Could not change visibility.', false, true);
+      refresh(); return;
+    }
+    if(res.failed && res.failed.length){
+      res.failed.forEach(f => { const r = rows.find(x => x.id === f.id); if(r){ r.visible = !value; r.canToggle = false; } });
+      render();
+      const first = res.failed[0];
+      toast(res.failed.length + ' item(s) could not be toggled — e.g. ' +
+            (first.name || first.id) + ': ' + first.error, false, true);
+      return;
+    }
+    if(res.parentsShown){
+      // Parent occurrences were switched on too, so their rows are now stale.
+      toast('Shown ' + res.changed + ' item(s), plus ' + res.parentsShown +
+            ' parent(s) that were hidden.', true);
+      refresh();
+    } else {
+      toast((value ? 'Shown ' : 'Hidden ') + res.changed + ' item(s).', true);
+    }
+  });
+}
+
+/* ============================ events ============================ */
+/* Right-click a name to jump to that entity elsewhere in Fusion. */
+let ctxRow = null;
+
+function hideCtx(){ $('ctxmenu').style.display = 'none'; ctxRow = null; }
+
+tbodyEl.addEventListener('contextmenu', e => {
+  if(!e.target || typeof e.target.closest !== 'function'){ hideCtx(); return; }
+  const cell = e.target.closest('td.c-name');
+  const tr = cell && cell.closest('tr');
+  if(!cell || !tr || tr.classList.contains('grp')) { hideCtx(); return; }
+  e.preventDefault();
+  ctxRow = +tr.dataset.id;
+  const menu = $('ctxmenu');
+  menu.style.display = 'block';
+  // keep it on screen near the edges
+  const w = menu.offsetWidth || 168, h2 = menu.offsetHeight || 90;
+  menu.style.left = Math.min(e.clientX, window.innerWidth  - w - 6) + 'px';
+  menu.style.top  = Math.min(e.clientY, window.innerHeight - h2 - 6) + 'px';
+  uiLog('Right-click: "' + rowName(ctxRow) + '"');
+});
+
+$('ctxmenu').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if(!btn || ctxRow === null) return;
+  const where = btn.dataset.where, id = ctxRow;
+  hideCtx();
+  send('showIn', {id:id, where:where}).then(res => {
+    if(!res || res.ok === false) toast((res && res.error) || 'Could not run that command.', false, true);
+  });
+});
+
+window.addEventListener('mousedown', e => {
+  // window-level: the target is not always an Element, so closest() may be absent
+  const t = e.target;
+  if(!t || typeof t.closest !== 'function' || !t.closest('#ctxmenu')) hideCtx();
+});
+window.addEventListener('keydown', e => { if(e.key === 'Escape') hideCtx(); });
+window.addEventListener('blur', hideCtx);
+
+/* The only clickable row. Entity rows remain inert. */
+tbodyEl.addEventListener('click', e => {
+  if(e.target.type === 'checkbox') return;
+
+  // Entity rows stay inert apart from their caret, so clicking a name or path
+  // still does nothing - but the click is still worth recording.
+  const caret = e.target.closest('.caret[data-parent]');
+  if(caret){
+    const id = +caret.dataset.parent;
+    const opening = !expandedParents.has(id);
+    uiLog('Caret: "' + rowName(id) + '" -> ' + (opening ? 'expand' : 'collapse'));
+    if(opening) expandedParents.add(id); else expandedParents.delete(id);
+    render();
+    return;
+  }
+
+  const grp = e.target.closest('tr.grp');
+  if(grp){
+    const key = grp.dataset.key;
+    const g = groupIndex[key];
+    /* An impatient second click used to collapse the group just as its rows
+       arrived - the load is slow, the row said nothing, so of course it got
+       clicked again. While a load is in flight the row is inert. */
+    if(loadingGroups.has(key)){
+      uiLog('Group row: still loading — click ignored, it will open on its own');
+      return;
+    }
+    const opening = !expanded.has(key);
+    uiLog('Group row: "' + (g ? g.type + ' × ' + (g.count || g.items.length) : key) +
+          '" -> ' + (opening ? 'expand' : 'collapse'));
+    if(opening) expanded.add(key); else expanded.delete(key);
+    // v2.36.3: report the state that survived the render, not the intent.
+    // "collapse" was logged eleven times running while the group stayed open.
+    setTimeout(() => {
+      const now = expanded.has(key);
+      if(now !== opening) uiLog('  ...but it is still ' + (now ? 'open' : 'closed'), 'warn');
+    }, 0);
+    // Opening a group is what asks Fusion for its rows. Collapsing keeps them:
+    // they were paid for already, and reopening should be instant.
+    // g.loaded, not the global set: a group whose rows already exist - because
+    // they came with the scan, or were fetched earlier - has nothing to fetch
+    if(opening && g && !g.loaded) loadGroup(key, g.parentId, g.type);
+    else render();
+    return;
+  }
+
+  /* Anywhere in the row, not just the name cell. "Click a row" meant the row -
+     the first cut only listened on Entity Name, so a click on Type or Path did
+     nothing at all and the feature looked dead. The controls are excluded
+     because they have their own jobs. */
+  if(e.target.closest('input, .caret, tr.grp')) return;
+  const row = e.target.closest('tbody tr:not(.spacer)');
+  const id = row && row.dataset.id !== undefined ? +row.dataset.id : null;
+  if(id !== null){
+    uiLog('Row: "' + rowName(id) + '" — asking Fusion to flash it');
+    startFlash(id, row);
+    return;
+  }
+  /* v2.36.5: every other interaction writes a line, so a click that reaches no
+     branch used to leave the log looking as though the click never happened -
+     and "the caret is dead" became impossible to tell from "I missed it". Name
+     what was actually under the pointer. */
+  const t = e.target;
+  uiLog('Click hit <' + t.tagName.toLowerCase() +
+        (t.className ? ' class="' + t.className + '"' : '') +
+        '> which has no action — nothing done', 'warn');
+});
+
+/* ------------------------- flashing an entity -------------------------
+
+   Click a row and its entity blinks in the viewport until the pointer leaves
+   that row. Deliberately not implemented by selecting it: the table is a
+   readout of what *you* have picked, and hijacking the selection to point at
+   something would destroy the thing the table exists to show. Fusion draws an
+   overlay instead - custom graphics, view-only - and this side owns the timer,
+   because an add-in has no reliable one.
+
+   Rows are still inert in every other way. This starts nothing that a mouse
+   leaving the row does not stop. */
+const FLASH_MS = 420;
+let flashId = null, flashRow = null, flashTimer = null, flashOn = true;
+/* Groups that hold something selected but have not been built. */
+let lastHints = [];
+
+function stopFlash(why){
+  if(flashTimer){ clearInterval(flashTimer); flashTimer = null; }
+  if(flashRow){ flashRow.classList.remove('flashing'); flashRow = null; }
+  if(flashId === null) return;
+  flashId = null;
+  send('flashOff', {}).catch(() => {});
+  if(why) uiLog('Flash stopped (' + why + ')');
+}
+
+function startFlash(id, row){
+  if(flashId === id) return;            // already flashing this one
+  stopFlash();
+  flashId = id;
+  flashRow = row;
+  row.classList.add('flashing');
+  send('flash', {id:id}).then(res => {
+    if(flashId !== id) return;          // moved on while Fusion was thinking
+    if(!res || res.flashing === false){
+      row.classList.remove('flashing');
+      const why = (res && res.why) || 'Nothing to flash for that row.';
+      logLine('Flash: "' + rowName(id) + '" — ' + why, 'warn');
+      toast(why, false, true);
+      flashId = null; flashRow = null;
+      return;
+    }
+    logLine('Flash: "' + rowName(id) + '" — drawn as ' + (res.how || 'graphics'), 'ok');
+    flashOn = true;
+    flashTimer = setInterval(() => {
+      flashOn = !flashOn;
+      send('flashPulse', {on:flashOn}).catch(() => stopFlash('bridge'));
+    }, FLASH_MS);
+  }).catch(() => stopFlash('failed'));
+}
+
+/* The pointer leaving the row is the stop signal, so it has to be caught on the
+   way out of the row itself - mouseout bubbles, mouseleave on tbody would only
+   fire when the pointer left the whole table. */
+tbodyEl.addEventListener('mouseout', e => {
+  if(!flashRow) return;
+  const to = e.relatedTarget;
+  if(to && flashRow.contains(to)) return;   // still inside the same row
+  stopFlash('pointer left the row');
+});
+
+// and anything that rebuilds or hides the table takes the overlay with it
+wrap.addEventListener('scroll', () => { if(flashId !== null) stopFlash('scrolled'); },
+                      {passive:true});
+window.addEventListener('blur', () => stopFlash());
+
+tbodyEl.addEventListener('change', e => {
+  const cb = e.target;
+  if(cb.type !== 'checkbox') return;
+  const id = +cb.dataset.id;
+
+  if(cb.dataset.col === 'selgroup'){
+    const g = groupIndex[cb.dataset.key];
+    if(!g) return;
+    uiLog('Checkbox: group "' + g.type + ' × ' + g.items.length + '" -> ' +
+          (cb.checked ? 'select all' : 'deselect all'));
+    const wanted = new Set(selected);
+    g.items.forEach(r => { if(cb.checked) wanted.add(r.id); else wanted.delete(r.id); });
+    setSelection([...wanted]);
+    return;
+  }
+
+  if(cb.dataset.col === 'sel'){
+    uiLog('Checkbox: Selected "' + rowName(id) + '" -> ' + (cb.checked ? 'select' : 'deselect'));
+    // Send the whole desired set, so the palette and Fusion can't disagree.
+    const wanted = new Set(selected);
+    if(cb.checked) wanted.add(id); else wanted.delete(id);
+    setSelection([...wanted], id, cb.checked);
+    return;
+  }
+
+  uiLog('Checkbox: Show "' + rowName(id) + '" -> ' + (cb.checked ? 'show' : 'hide'));
+  // Each Show checkbox drives its own row only - no action-at-a-distance from
+  // the Fusion selection. For bulk work use "Selected only" + Show all/Hide all.
+  setVisibility([id], cb.checked);
+});
+
+function setSelection(ids, changedId, wantChecked){
+  send('setSelection', {ids:ids}).then(res => {
+    if(!res || res.ok === false){
+      toast((res && res.error) || 'Could not change the selection.', false, true);
+      render();
+      return;
+    }
+    applyData(res);
+    if(res.refused && res.refused.length){
+      toast(res.refused[0], false, true);
+    } else if(wantChecked && changedId !== undefined && !selected.has(changedId)){
+      // Fusion accepted the call but didn't take the entity - usually because
+      // it's hidden, which makes it unselectable in the canvas.
+      toast('Fusion would not select that entity. Hidden entities cannot be selected.');
+    }
+  });
+}
+
+/* Rows are deliberately inert. Clicking one does nothing: the Selection column
+   and the row highlight are a readout of Fusion's selection, never a control
+   for it. The only interactive element in a row is its Show checkbox. */
+
+/* Shared by both segmented groups: the checked input's label gets .on. */
+function paintRadios(groupId){
+  [...$(groupId).querySelectorAll('label')].forEach(l => {
+    l.classList.toggle('on', l.querySelector('input').checked);
+  });
+}
+
+function applyCopyMode(){
+  const input = $('copyMode').querySelector('input[value="' + copyMode + '"]');
+  if(input) input.checked = true;
+  paintRadios('copyMode');
+}
+
+$('copyMode').addEventListener('change', e => {
+  if(!e.target.name) return;
+  copyMode = e.target.value;
+  uiLog('Radio: copy mode -> ' + copyMode);
+  paintRadios('copyMode');
+  savePrefs();
+});
+
+function paintVisMode(){
+  [...$('visMode').querySelectorAll('label')].forEach(l => {
+    l.classList.toggle('on', l.querySelector('input').checked);
+  });
+}
+function selectVisMode(mode){
+  const input = $('visMode').querySelector('input[value="' + mode + '"]');
+  if(input){ input.checked = true; visMode = mode; paintVisMode(); }
+}
+
+/* Sets real visibility in the model, then applies the rescan that comes back so
+   the Show column matches Fusion's browser rather than drifting from it. */
+$('visMode').addEventListener('change', e => {
+  if(!e.target.name) return;
+  const mode = e.target.value;
+  uiLog('Radio: visibility mode -> ' + mode);
+  paintVisMode();
+  send('visibilityMode', {mode:mode}).then(res => {
+    if(!res || res.ok === false){
+      toast((res && res.error) || 'Could not change visibility.', false, true);
+      selectVisMode(visMode);          // put the radio back where it was
+      return;
+    }
+    visMode = mode;
+    applyData(res);
+    selectVisMode(mode);               // applyData re-rendered; keep the radio lit
+    let msg = res.changed ? res.changed + ' item(s) switched.' : 'Nothing needed changing.';
+    if(res.failed && res.failed.length) msg += ' ' + res.failed.length + ' could not be changed.';
+    toast(msg, true, true);
+  });
+});
+
+$('btnSelOnly').addEventListener('click', () => {
+  selectedOnly = !selectedOnly;
+  $('btnSelOnly').classList.toggle('on', selectedOnly);
+  render();
+  if(selectedOnly && !selected.size){
+    toast('Nothing is selected in Fusion, so the list is empty. Pick something in the canvas or browser.');
+  }
+});
+
+$('btnRefresh').addEventListener('click', refresh);
+$('btnUnderCon').addEventListener('click', () => {
+  if(!inSketch) return;                    // belt and braces; it is also disabled
+  send('textCommand', {command:'showUnderConstrained'}).then(res => {
+    if(!res || res.ok === false){
+      toast((res && res.error) || 'Could not run the command.', false, true);
+    } else {
+      toast('Ran ' + res.command + (res.result ? ' — ' + res.result : ''), true, true);
+    }
+    if(res && res.sketchState) setSketchState(res.sketchState);
+  });
+});
+
+/* Filtering and sorting can only see rows that exist, and sub-entity rows are
+   built on expand. So there has to be a way to say "actually, all of them" -
+   with the cost stated first, since on this model it is the 100 seconds that
+   started all this. */
+$('btnLoadAll').addEventListener('click', () => {
+  const n = pendingSubCount();
+  if(!n) return;
+  uiLog('Load all sub-entities: ' + n.toLocaleString() + ' rows');
+  toast('Building ' + n.toLocaleString() + ' sub-entity rows — this is the slow ' +
+        'one, and it is why they load on expand.', false, true);
+  $('btnLoadAll').disabled = true;
+  send('loadAllSub', {}).then(res => {
+    $('btnLoadAll').disabled = false;
+    if(!res || res.ok === false){ toast('Could not load them all.'); return; }
+    for(const r of (res.rows || [])) loadedGroups.add(r.parentId + '|' + (r.group || r.type));
+    mergeRows(res.rows || []);
+    if(Array.isArray(res.selected)) selected = new Set(res.selected);
+    render();
+    toast((res.rows || []).length.toLocaleString() + ' sub-entity rows loaded.', true, true);
+  });
+});
+
+/* How many counted-but-not-built rows there are, which is what the button is
+   offering to do and what it costs. */
+function pendingSubCount(){
+  let n = 0;
+  for(const r of rows){
+    if(!r.subGroups) continue;
+    for(const dec of r.subGroups){
+      if(!isLoaded(r.id + '|' + dec.type)) n += dec.count;
+    }
+  }
+  return n;
+}
+
+$('btnReveal').addEventListener('click', () => {
+  revealSelected = !revealSelected;
+  $('btnReveal').classList.toggle('on', revealSelected);
+  logLine('Reveal selected: ' + (revealSelected ? 'on' : 'off'), 'ui');
+  // Switching it on has to ask Fusion again: the hints for whatever is already
+  // picked came and went with the last payload, and rendering cannot conjure
+  // rows that were never built.
+  if(revealSelected) refresh(); else render();
+});
+
+$('btnSub').addEventListener('click', () => {
+  subEntities = !subEntities;
+  expanded.clear();
+  expandedParents.clear();
+  $('btnSub').classList.toggle('on', subEntities);
+  toast(subEntities ? 'Scanning sub-entities…' : 'Back to top-level entities…', true);
+  send('refresh', {subEntities:subEntities, uiVersion:UI_VERSION}).then(res => {
+    applyData(res);
+    if(subEntities && res && res.subCount){
+      toast(res.subCount.toLocaleString() +
+            ' sub-entities found — click a ▸ to expand a row.', true);
+    }
+  });
+});
+/* Scrolling exposes rows squeeze() has never measured; resizing the palette
+   changes how much room every cell has. Both are coalesced into one pass per
+   frame, so a fast scroll costs one measurement sweep, not one per event. */
+wrap.addEventListener('scroll', onTableScroll, {passive:true});
+// the pane changing size changes the spacer, so widths must be re-applied,
+// not merely re-squeezed
+window.addEventListener('resize', applyWidths);
+
+$('fitbarGo').addEventListener('click', () => {
+  logLine('Fit: every column that was cut off (asked for)', 'ui');
+  COLS.forEach((c,i) => { if(_flagged[i]) fitColumn(i); });
+  hideFitBar();
+});
+$('fitbarX').addEventListener('click', () => {
+  barDismissed = true;
+  logLine('Notice dismissed — the FIT markers stay in the headers.', 'ui');
+  hideFitBar();
+});
+
+$('btnFit').addEventListener('click', fitAll);
+$('btnReset').addEventListener('click', resetAll);
+$('btnShow').addEventListener('click', () => setVisibility(view.filter(r => r.canToggle && !r.visible).map(r => r.id), true));
+$('btnHide').addEventListener('click', () => setVisibility(view.filter(r => r.canToggle && r.visible).map(r => r.id), false));
+
+function paintFilterClear(){
+  $('filter').parentNode.classList.toggle('has-text', $('filter').value.length > 0);
+}
+function clearFilter(){
+  $('filter').value = '';
+  paintFilterClear();
+  render();
+}
+$('btnClearFilter').addEventListener('click', () => { clearFilter(); $('filter').focus(); });
+
+let deb;
+$('filter').addEventListener('input', () => {
+  paintFilterClear();
+  clearTimeout(deb); deb = setTimeout(render, 130);
+});
+$('typeFilter').addEventListener('change', () => {
+  uiLog('Dropdown: type filter -> ' + ($('typeFilter').value || 'all types'));
+  render();
+});
+window.addEventListener('keydown', e => {
+  if(e.key === 'F5' || ((e.ctrlKey||e.metaKey) && e.key.toLowerCase() === 'r')){ e.preventDefault(); refresh(); }
+  if(e.key === 'Escape'){ clearFilter(); }
+});
+
+/* ============================ log pane ============================ */
+const LOG_MAX = 500;          // keep memory bounded on a long session
+let lastBanner = '';
+let lastMarker = null;   // timeline marker position from the last payload
+let logHeight = 150;
+let logVisible = false;       // off by default; the toggle and prefs can turn it on
+let legendVisible = false;    // mirrors the legend palette, owned by Fusion
+let copyMode = 'color';       // 'color' keeps the level colors; 'plain' is text only
+
+function logLine(message, level){
+  const body = $('logbody');
+  const now = new Date();
+  const stamp = [now.getHours(), now.getMinutes(), now.getSeconds()]
+                  .map(n => String(n).padStart(2,'0')).join(':');
+  const row = document.createElement('div');
+  row.className = 'ln ' + (level || '');
+  row.innerHTML = '<span class="t">' + stamp + '</span><span class="m">' + esc(message) + '</span>';
+
+  // only stick to the bottom if the user is already there
+  const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
+  body.appendChild(row);
+  while(body.childElementCount > LOG_MAX) body.removeChild(body.firstChild);
+  if(atBottom) body.scrollTop = body.scrollHeight;
+}
+
+function setLogVisible(on){
+  logVisible = !!on;
+  $('logpane').style.display = logVisible ? 'flex' : 'none';
+  $('loghandle').style.display = logVisible ? 'block' : 'none';
+  $('btnLog').classList.toggle('on', logVisible);
+  applyLogHeight();
+  savePrefs();
+}
+function applyLogHeight(){
+  logHeight = Math.max(60, Math.min(window.innerHeight - 160, Math.round(logHeight)));
+  $('logpane').style.height = logHeight + 'px';
+}
+
+let logDrag = null;
+$('loghandle').addEventListener('mousedown', e => {
+  e.preventDefault();
+  logDrag = {y:e.clientY, h:logHeight};
+  document.body.classList.add('resizing-v');
+  window.addEventListener('mousemove', onLogDrag);
+  window.addEventListener('mouseup', endLogDrag);
+});
+function onLogDrag(e){
+  if(!logDrag) return;
+  logHeight = logDrag.h + (logDrag.y - e.clientY);   // drag up = taller
+  applyLogHeight();
+}
+function endLogDrag(){
+  logDrag = null;
+  document.body.classList.remove('resizing-v');
+  window.removeEventListener('mousemove', onLogDrag);
+  window.removeEventListener('mouseup', endLogDrag);
+  savePrefs();
+}
+
+/* Interaction trace. Logged in the capture phase so the click is recorded
+   before whatever it triggers, giving a readable cause-then-effect ordering. */
+function uiLog(message){ logLine(message, 'ui'); }
+
+function buttonLabel(btn){
+  return (btn.textContent || btn.id || 'button').replace(/\s+/g, ' ').trim();
+}
+document.addEventListener('click', e => {
+  const t = e.target;
+  if(!t || typeof t.closest !== 'function') return;
+  const btn = t.closest('button');
+  if(btn) uiLog('Click: ' + buttonLabel(btn) + (btn.disabled ? ' (disabled)' : ''));
+}, true);
+
+/* The legend lives in its own floating palette, opened and closed by Fusion;
+   the button just mirrors whatever state comes back. */
+function paintLegendButton(){
+  $('btnLegend').classList.toggle('on', legendVisible);
+}
+$('btnLegend').addEventListener('click', () => {
+  send('toggleLegend').then(res => {
+    if(!res || res.ok === false){ toast((res && res.error) || 'Could not open the legend.'); return; }
+    legendVisible = !!res.visible;
+    paintLegendButton();
+  });
+});
+
+/* One panel visible at a time. Every control keeps its id, so nothing else
+   in here has to know the toolbar was split up. */
+const TABS = ['list','vis','cols','tools'];
+let activeTab = 'list';
+
+function setTab(name){
+  if(TABS.indexOf(name) === -1) name = 'list';
+  activeTab = name;
+  TABS.forEach(t => {
+    const panel = $('tab-' + t);
+    if(panel) panel.style.display = (t === name) ? 'flex' : 'none';
+  });
+  [...document.querySelectorAll('.tabbar .tab')].forEach(b =>
+    b.classList.toggle('on', b.dataset.tab === name));
+  savePrefs();
+}
+
+document.querySelector('.tabbar').addEventListener('click', e => {
+  const tab = e.target.closest && e.target.closest('.tab');
+  if(!tab) return;
+  uiLog('Tab: ' + tab.textContent.trim());
+  setTab(tab.dataset.tab);
+});
+
+$('btnLog').addEventListener('click', () => setLogVisible(!logVisible));
+$('btnLogHide').addEventListener('click', () => setLogVisible(false));
+$('btnLogSave').addEventListener('click', () => {
+  const text = logText();
+  if(!text){ toast('The log is empty - nothing to save.'); return; }
+  send('saveLog', {html: logHTML(), text: text}).then(res => {
+    if(!res || res.ok === false) toast((res && res.error) || 'Could not save the log.', false, true);
+    else toast('Saved to ' + res.path, true, true);
+  });
+});
+
+$('btnLogClear').addEventListener('click', () => { $('logbody').innerHTML = ''; logLine('Log cleared.', 'sys'); });
+function logText(){
+  return [...$('logbody').children]
+    .map(r => r.querySelector('.t').textContent + '  ' + r.querySelector('.m').textContent)
+    .join('\n');
+}
+
+/* Copy via a throwaway textarea.
+
+   Fusion serves the palette from a file:// path, which is not a secure context,
+   so navigator.clipboard is usually absent - and when it is present its
+   writeText() rejects asynchronously, which a plain try/catch never sees. Both
+   failure modes leave whatever was already on the clipboard, which is why Copy
+   looked like it was pasting something else entirely. execCommand works here.
+
+   The user's own selection is saved and restored, so copying the log doesn't
+   wipe a selection they were in the middle of making. */
+function copyToClipboard(text){
+  let restore = null;
+  try{
+    const sel = document.getSelection();
+    if(sel && sel.rangeCount) restore = sel.getRangeAt(0).cloneRange();
+
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:absolute; left:-9999px; top:0; opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    if(ta.setSelectionRange) ta.setSelectionRange(0, text.length);
+
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+
+    if(restore && sel){ sel.removeAllRanges(); sel.addRange(restore); }
+    return !!ok;
+  }catch(e){
+    return false;
+  }
+}
+
+/* Colors for the rich flavour. Deliberately not the on-screen neon: these are
+   darkened so a line stays readable whether the wrapper's dark background
+   survives the paste or the target strips it and leaves black-on-white. */
+const COPY_COLORS = {'':'#6b7280', ui:'#9aa3ad', ok:'#00a05a',
+                      warn:'#b8860b', err:'#d1435b', sys:'#00a8c6'};
+
+const COPY_BG = '#000000';
+
+/* The background has to sit on the runs that actually carry text, not just on
+   a wrapper.
+
+   Rich-text converters (TextEdit's HTML-to-RTF, Word, Mail) have no concept of
+   a block's backdrop - they map background-color onto each character run as a
+   highlight attribute. A wrapper-only background is therefore dropped, and the
+   text inherits the document default, which is white. Declaring it on every
+   div AND every span is what makes it survive. Long-hand background-color is
+   used throughout: some converters ignore the `background` shorthand. */
+function logHTML(){
+  const lines = [...$('logbody').children].map(row => {
+    const level = [...row.classList].find(c => c !== 'ln') || '';
+    const color = COPY_COLORS[level] || COPY_COLORS[''];
+    const stamp = row.querySelector('.t').textContent;
+    const message = row.querySelector('.m').textContent;
+    return '<div style="background-color:' + COPY_BG + ';color:' + color +
+             ';white-space:pre-wrap;margin:0;">' +
+           '<span style="background-color:' + COPY_BG + ';color:#8a8f98;">' +
+             esc(stamp) + '</span>' +
+           '<span style="background-color:' + COPY_BG + ';color:' + color + ';">' +
+             '&nbsp;&nbsp;' + esc(message) + '</span>' +
+           '</div>';
+  }).join('');
+  return '<div style="background-color:' + COPY_BG + ';color:' + COPY_COLORS[''] +
+         ';padding:10px;font-family:Consolas,Menlo,monospace;font-size:12px;' +
+         'line-height:1.55;">' + lines + '</div>';
+}
+
+/* Puts both flavours on the clipboard: text/html so colors survive a paste
+   into anything rich, and text/plain for editors and terminals. The copy event
+   fires from the execCommand below, and setData wins over the textarea's
+   contents. If the event never fires, the plain text has still been copied. */
+function copyRich(plain, html){
+  let rich = false;
+  function onCopy(e){
+    try{
+      const data = e.clipboardData || window.clipboardData;
+      if(!data) return;
+      data.setData('text/plain', plain);
+      data.setData('text/html', html);
+      e.preventDefault();
+      rich = true;
+    }catch(err){ /* fall through to the plain copy */ }
+  }
+  document.addEventListener('copy', onCopy, true);
+  const plainOk = copyToClipboard(plain);
+  document.removeEventListener('copy', onCopy, true);
+  return {ok: rich || plainOk, rich: rich};
+}
+
+$('btnLogCopy').addEventListener('click', () => {
+  const text = logText();
+  if(!text){ toast('The log is empty - nothing to copy.'); return; }
+  const lines = text.split('\n').length;
+
+  if(copyMode === 'plain'){
+    if(copyToClipboard(text)) toast(lines + ' log line(s) copied as plain text.', true);
+    else toast('Could not write to the clipboard. The log is selectable - drag across it and press Ctrl/Cmd+C.');
+    return;
+  }
+
+  const res = copyRich(text, logHTML());
+  if(res.ok){
+    toast(lines + ' log line(s) copied' +
+          (res.rich ? ' with colors - paste into anything rich to keep them.'
+                    : ' as plain text (this destination refused the colored version).'), true);
+  }else{
+    toast('Could not write to the clipboard. The log is selectable - drag across it and press Ctrl/Cmd+C.');
+  }
+});
+
+/* Two kinds of state, and only one is a preference.
+
+   How things look once you are using them - log height, copy mode, column
+   widths - is worth carrying between sessions. Which tab is open, whether the
+   log is showing, and which toggles are lit are the *opening* state, and that
+   is asked to be the same every time: List, log hidden, nothing on. Storing
+   those meant a session where you happened to end on the Tools tab with the
+   log open reopened that way forever, which is what "start in list tab, log
+   hidden" was asking to stop. */
+function savePrefs(){
+  try{
+    window.localStorage.setItem('si.log', JSON.stringify({h:logHeight, copy:copyMode}));
+  }catch(e){}
+}
+function loadPrefs(){
+  try{
+    const raw = window.localStorage.getItem('si.log');
+    if(raw){
+      const p = JSON.parse(raw);
+      if(typeof p.h === 'number') logHeight = p.h;
+      if(p.copy === 'color' || p.copy === 'plain') copyMode = p.copy;
+      // p.on and p.tab are deliberately ignored - see savePrefs. Older stored
+      // values may still contain them; reading them back is the bug.
+
+    }
+  }catch(e){}
+}
+
+let toastTimer;
+/* silent=true for outcomes Python has already logged. Without it the same
+   result lands in the pane twice - once from Python, once from the toast -
+   which reads like the action happened twice. */
+function toast(msg, good, silent){
+  if(!silent) logLine(msg, good ? 'ok' : 'warn');
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'show' + (good ? ' good' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ''; }, good ? 1800 : 5200);
+}
+
+/* ============================ boot ============================ */
+/* Poll for the bridge instead of assuming it exists on parse. Fusion injects
+   `adsk` at its own pace, and on a cold start that can be a second or two
+   after the document script runs. */
+function waitForBridge(tries, done){
+  if(bridgeReady()){ setMode(true); done(); return; }
+  if(tries <= 0){ setMode(false); done(); return; }
+  setTimeout(() => waitForBridge(tries - 1, done), 100);
+}
+
+let booted = false;
+function boot(){
+  if(booted) return;
+  booted = true;
+  loadWidths();
+  loadPrefs();
+  setTab(activeTab);
+  applyCopyMode();
+  paintLegendButton();
+  setLogVisible(logVisible);
+  logLine('Palette loaded.', 'sys');
+  loadReveal();
+  buildHeader();
+  render('Connecting to Fusion…');
+
+  // Keep polling for up to ~12s; the moment the bridge appears, load real data.
+  waitForBridge(120, () => { if(connected) send('ready', {subEntities:subEntities, uiVersion:UI_VERSION}).then(applyData); });
+
+  // If it hasn't shown up quickly we're almost certainly in a browser, so drop
+  // to the standalone preview dataset. A late bridge still overrides this.
+  setTimeout(() => {
+    if(!connected && !rows.length){ setMode(false); send('ready', {subEntities:subEntities, uiVersion:UI_VERSION}).then(applyData); }
+  }, 1500);
+}
+
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', boot);
+  window.addEventListener('load', boot);
+} else {
+  boot();
+}
+
+/* ---- standalone preview data, so this file can be opened in a browser ---- */
+function demoReply(action, data){
+  if(action === 'ready' || action === 'refresh'){
+    const demo = [
+      ['Root','Component',1,'root','Root component',true],
+      ['Frame:1','Component',2,'root / Frame:1','Local · instance 1 of 2 · grounded',true],
+      ['Frame:2','Component',2,'root / Frame:2','Local · instance 2 of 2',false],
+      ['Bracket:1','Component',4,'root / Frame:1 / Bracket:1','Linked · instance 1 of 4',true],
+      ['Body1','Body',2,'root / Frame:1 / Body1','2 occurrences',true],
+      ['Rail','Body',4,'root / Frame:1 / Bracket:1 / Rail','4 occurrences',true],
+      ['Base Profile','Sketch',2,'root / Frame:1 / Base Profile','2 occurrences',false],
+      ['Mid Plane','Plane',1,'root / Mid Plane','Root component',false],
+      ['Pivot','Joint',4,'root / Frame:1 / Bracket:1 / Pivot','4 occurrences',true],
+      ['Datum Axis','Axis',1,'root / Datum Axis','Root component',false],
+      ['Face 1','Face',2,'root / Frame:1 / Body1 / Face 1','2 occurrences',true],
+      ['Edge 4','Edge',2,'root / Frame:1 / Body1 / Edge 4','2 occurrences',true],
+      ['Vertex 2','Vertex',2,'root / Frame:1 / Body1 / Vertex 2','2 occurrences',true],
+      ['Line 3','Sketch Line',2,'root / Frame:1 / Base Profile / Line 3','2 occurrences',true],
+      ['Point 1','Sketch Point',2,'root / Frame:1 / Base Profile / Point 1','2 occurrences',true]
+    ];
+    // 3 picked directly, 4 matched through a picked face -> 3 raw entities, 2 rows
+    return {ok:true, version:'2.36.6', document:'preview.f3d (standalone)',
+      selected:[3,4,10], selCount:4, subEntities:true, subCount:5, truncated:false,
+      sketchState:{inSketch:false, sketch:''},
+      timeline:{available:true, position:12, count:34},
+      rows: demo.map((d,i) => ({id:i, name:d[0], type:d[1], qty:d[2], path:d[3], status:d[4], visible:d[5], canToggle:true}))};
+  }
+  if(action === 'showIn'){
+    return {ok:false, error:'Not connected to Fusion — this is the standalone preview.'};
+  }
+  if(action === 'toggleLegend'){
+    return {ok:false, error:'Not connected to Fusion — this is the standalone preview.'};
+  }
+  if(action === 'saveLog'){
+    return {ok:false, error:'Not connected to Fusion — this is the standalone preview.'};
+  }
+  if(action === 'setSelection'){
+    return {ok:false, error:'Not connected to Fusion — this is the standalone preview.'};
+  }
+  if(action === 'visibilityMode'){
+    return {ok:false, error:'Not connected to Fusion — this is the standalone preview.'};
+  }
+  if(action === 'textCommand'){
+    return {ok:false, error:'Not connected to Fusion — this is the standalone preview.'};
+  }
+  return {ok:true, changed:(data && data.ids ? data.ids.length : 0), failed:[], parentsShown:0};
+}
+</script>
+</body>
+</html>

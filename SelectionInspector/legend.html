@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qty color legend</title>
+<style>
+:root{
+  --bg:#0d0d0f; --panel:#141418; --cyan:#00e5ff; --amber:#ffb020; --yellow:#ffe14d; --pink:#ff5c7a;
+  --violet:#7c5cff; --green:#00ff88; --text:#e8e8ec; --text-dim:#9aa0aa; --text-mute:#6a6f78; --border:#26262e;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;}
+html,body{width:max-content;}
+body{
+  margin:0; padding:14px 16px; background:var(--bg); color:var(--text);
+  font-family:var(--sans); font-size:12.5px; -webkit-user-select:none; user-select:none;
+}
+h1{
+  font-family:var(--mono); font-size:9.5px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--text-dim); margin:0 0 12px; font-weight:500;
+}
+#fit{display:inline-block;}
+ul{list-style:none; margin:0; padding:0;}
+li{display:flex; align-items:flex-start; gap:10px; padding:7px 0; border-bottom:1px solid #1c1c22;}
+li:last-of-type{border-bottom:0;}
+.sw{
+  flex:0 0 auto; width:16px; height:16px; border-radius:3px; margin-top:1px;
+  border:1px solid rgba(255,255,255,.14);
+}
+.sw-single{background:var(--yellow);}
+.sw-multi{background:var(--amber);}
+.sw-linked{background:var(--violet);}
+.sw-local{background:var(--green);}
+.sw-unplaced{background:var(--pink);}
+.sw-suppressed{background:var(--text-mute); position:relative; overflow:hidden;}
+.sw-suppressed::after{
+  content:''; position:absolute; left:-2px; right:-2px; top:50%; height:2px;
+  background:var(--bg); transform:translateY(-50%);
+}
+.txt{min-width:0;}
+.nm{font-family:var(--mono); font-size:11px; color:var(--text); letter-spacing:.02em;}
+.ds{color:var(--text-dim); font-size:11.5px; line-height:1.45; margin-top:1px; white-space:nowrap;}
+.note{
+  margin-top:12px; padding-top:10px; border-top:1px solid var(--border);
+  color:var(--text-mute); font-size:11px; font-style:italic; line-height:1.5;
+  white-space:nowrap;
+}
+</style>
+</head>
+<body>
+<div id="fit">
+<h1>Qty color coding</h1>
+<ul>
+  <li><span class="sw sw-suppressed"></span><span class="txt">
+    <span class="nm">Suppressed</span>
+    <div class="ds">The placement is suppressed, so its count doesn't apply.</div></span></li>
+  <li><span class="sw sw-unplaced"></span><span class="txt">
+    <span class="nm">Unplaced</span>
+    <div class="ds">The component exists but is placed nowhere in the assembly.</div></span></li>
+  <li><span class="sw sw-linked"></span><span class="txt">
+    <span class="nm">Linked</span>
+    <div class="ds">A placement of an external (linked) component.</div></span></li>
+  <li><span class="sw sw-local"></span><span class="txt">
+    <span class="nm">Local</span>
+    <div class="ds">A placement of a component defined in this document.</div></span></li>
+  <li><span class="sw sw-multi"></span><span class="txt">
+    <span class="nm">Multiple</span>
+    <div class="ds">A body or sketch shared by more than one placement.</div></span></li>
+  <li><span class="sw sw-single"></span><span class="txt">
+    <span class="nm">Single</span>
+    <div class="ds">Exactly one placement, or an unshared body or sketch.</div></span></li>
+</ul>
+<p class="note">Colors Entity Name, Qty and Path together. Where more than one applies, the first entry in this list wins.</p>
+</div>
+<script>
+"use strict";
+/* Report the size the content actually needs, so Fusion can open the window
+   fully expanded rather than at a guessed size that clips or scrolls. */
+function bridge(){
+  try{
+    const a = (typeof adsk !== 'undefined' && adsk) ? adsk : (window.adsk || null);
+    return (a && typeof a.fusionSendData === 'function') ? a : null;
+  }catch(e){ return null; }
+}
+function reportSize(){
+  const fit = document.getElementById('fit');
+  const style = window.getComputedStyle(document.body);
+  const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const payload = {
+    width: Math.ceil(fit.getBoundingClientRect().width + padX),
+    height: Math.ceil(fit.getBoundingClientRect().height + padY)
+  };
+  const a = bridge();
+  if(a) a.fusionSendData('legendSize', JSON.stringify(payload));
+  return !!a;
+}
+function boot(tries){
+  // wait for webfonts before measuring - they change the widest line
+  if(reportSize() || tries <= 0) return;
+  setTimeout(function(){ boot(tries - 1); }, 100);
+}
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(function(){ boot(60); }, function(){ boot(60); });
+}else{
+  window.addEventListener('load', function(){ boot(60); });
+}
+</script>
+</body>
+</html>

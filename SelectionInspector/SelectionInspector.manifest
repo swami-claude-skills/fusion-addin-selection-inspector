@@ -1,0 +1,13 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "addin",
+    "id": "865f6a99-b919-40ae-8e6e-bf3a8cd481b3",
+    "author": "Swami",
+    "description": {
+        "": "Non-modal palette (v2.36.6) that lists every entity in the active design in a sortable, resizable table with parent/child path, instance quantity, instance status, selection state and show/hide checkboxes."
+    },
+    "version": "2.36.6",
+    "runOnStartup": true,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
