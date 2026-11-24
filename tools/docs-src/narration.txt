@@ -1,0 +1,29 @@
+This is the documentation for Selection Inspector, an Autodesk Fusion add-in by Swami. It opens a dark, dockable table that lists every entity in your design, with its parent path, how many instances there are, its status, whether it is selected, and a checkbox to show or hide it. Right under the title you can download the latest version and open step by step install instructions.
+
+Section one, Dashboard Summary. A short introduction, a quick start, and an index of every section, so you can jump straight to the part you need. Most sections carry a diagram, a tree or a table.
+
+Section two, Search. Type a few words to find anything on this page, in any order and with small typos forgiven. Narrow the results with filters, and click a result to jump to it.
+
+Section three, What's New. One entry per released version, newest first, built from the release notes. Version two point three seven adds a settings file, Reset all, an update check and an error strip.
+
+Section four, The Palette. A schematic of the window from top to bottom: the tabs and Refresh, the toolbar, the red error strip, the green update bar, the table, the log and the footer, followed by what sits on each tab.
+
+Section five, The Table. What each column shows, from the Show and Selected checkboxes to the colour coded quantity, the parent path and the instance status, and how sorting, resizing and grouping work.
+
+Section six, Working With It. Everyday tasks: finding things with the filter, following the Fusion selection, showing and hiding in bulk, going back in the timeline, and copying the log when something goes wrong. It also explains how to give the button a keyboard shortcut.
+
+Section seven, Settings and Reset All. Which preferences are saved, where the settings file lives on a Mac and on Windows, and exactly what Reset all puts back.
+
+Section eight, Updates and Errors. A workflow diagram of the update check, from opening the palette to installing a newer version, plus the Auto-check switch and the red error strip.
+
+Section nine, Install and Update. Three ways to install, in Fusion, with the Mac installer, or with the Windows installer, including the one-time security prompts.
+
+Section ten, Files and Folders. A collapsible tree of the add-in folder, your settings folder and the repository.
+
+Section eleven, How It Works. The design decisions behind the behaviour, such as how a pick in the canvas is matched to a row, and why your shortcut survives a restart.
+
+Section twelve, First-Run Test Checklist. Fifteen checks to run in Fusion after installing.
+
+Section thirteen, Mind Map. The whole page as bubbles you can open, hover for a summary, and click to jump to that spot.
+
+Section fourteen, Glossary, defines the terms with a dotted underline, and section fifteen, References, links to the repository, the releases and Autodesk's help.
